@@ -33,6 +33,8 @@
     copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5"/><path d="M15.5 5.5h-9a2 2 0 0 0-2 2v9"/></svg>',
     trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4.5 7h15M10 7V4.5h4V7M6.5 7l.8 13h9.4l.8-13"/></svg>',
     pencil: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4.5 19.5h3l10-10-3-3-10 10z"/><path d="m14.5 6.5 3 3"/></svg>',
+    clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8.4"/><path d="M12 7.6V12l3.1 1.9"/></svg>',
+    lang: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8.6"/><path d="M3.6 12h16.8M12 3.4c2.6 2.6 2.6 14.6 0 17.2M12 3.4c-2.6 2.6-2.6 14.6 0 17.2"/></svg>',
     download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 4v10m0 0 4-4m-4 4-4-4M5 18.5h14"/></svg>',
     x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round"><path d="m6 6 12 12M18 6 6 18"/></svg>',
     link: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 4h6v6"/><path d="M20 4 10.5 13.5"/><path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>',
@@ -101,6 +103,7 @@
     lastDate: "",
     monthFolders: {},
     demoSeeded: false,
+    showZh: true,
   };
   const S = {
     view: "home",
@@ -121,6 +124,26 @@
       urls.delete(k);
     }
   }
+  const asBlob = (b) => (b instanceof Blob ? b : null);
+  function stripMedia(m) {
+    return {
+      ...m,
+      media: m.media
+        ? {
+            thumb: null,
+            full: null,
+            name: m.media.name,
+            mime: m.media.mime,
+            size: m.media.size,
+            w: m.media.w,
+            h: m.media.h,
+            duration: m.media.duration,
+            waves: m.media.waves,
+          }
+        : null,
+    };
+  }
+
   function blobUrl(key, blob) {
     if (!blob) return "";
     if (urls.has(key)) return urls.get(key);
@@ -177,10 +200,11 @@
   }
 
   function previewOf(m) {
-    if (m.type === "image") return "[图片]" + (m.text ? " " + m.text : "");
-    if (m.type === "video") return "[视频]" + (m.text ? " " + m.text : "");
-    if (m.type === "voice") return "[语音]";
-    return m.text || "";
+    const t = m.textZh || m.text || "";
+    if (m.type === "image") return "[图片]" + (t ? " " + t : "");
+    if (m.type === "video") return "[视频]" + (t ? " " + t : "");
+    if (m.type === "voice") return "[语音]" + (t ? " " + t : "");
+    return t;
   }
 
   /* ---------------- 首页 ---------------- */
@@ -192,7 +216,7 @@
     if (q) {
       artists = artists.filter((a) => {
         if (a.name.toLowerCase().includes(q)) return true;
-        return S.msgsAll.some((m) => m.artistId === a.id && (m.text || "").toLowerCase().includes(q));
+        return S.msgsAll.some((m) => m.artistId === a.id && ((m.text || "") + " " + (m.textZh || "")).toLowerCase().includes(q));
       });
     }
     artists.sort((a, b) => {
@@ -267,19 +291,20 @@
 
   function mediaHTML(m) {
     const med = m.media || {};
-    if ((m.type === "image" || m.type === "video") && !med.thumb) {
+    const thumb = asBlob(med.thumb);
+    if ((m.type === "image" || m.type === "video") && !thumb) {
       // 导入备份后没有缩略图：给一个可点击的云端占位
       return `<button class="thumb" data-act="open" style="aspect-ratio:1/1.15;width:190px;display:grid;place-items:center;background:#eceef5">
         <span style="font-size:11.5px;color:#8a8fa3;line-height:1.5;text-align:center">${driveIdOf(m) ? "云端原图<br>点开查看" : "原文件<br>点开查看"}</span></button>`;
     }
     if (m.type === "image") {
-      const src = blobUrl("t" + m.id, med.thumb);
+      const src = blobUrl("t" + m.id, thumb);
       const ar = med.w && med.h ? clamp(med.h / med.w, 0.55, 1.9) : 1.15;
       return `<button class="thumb" data-act="open" style="aspect-ratio:1/${ar.toFixed(2)};width:220px">
         <img src="${src}" alt="" loading="lazy"></button>`;
     }
     if (m.type === "video") {
-      const src = blobUrl("t" + m.id, med.thumb);
+      const src = blobUrl("t" + m.id, thumb);
       const ar = med.w && med.h ? clamp(med.h / med.w, 0.55, 1.9) : 1.15;
       return `<button class="thumb" data-act="open" style="aspect-ratio:1/${ar.toFixed(2)};width:220px">
         <img src="${src}" alt="" loading="lazy">
@@ -308,8 +333,15 @@
         : ""
       : "";
     const star = m.starred ? `<span class="star">${ICON.starFill}</span>` : "";
-    const textHTML =
-      m.type === "text" || (isMedia && m.text) ? `<div class="${isMedia ? "cap" : ""}">${esc(m.text)}</div>` : "";
+    const showZh = S.settings.showZh !== false;
+    const raw = (m.text || "").trim();
+    const zh = (m.textZh || "").trim();
+    let inner = "";
+    if (raw) inner += `<div class="txt">${esc(raw)}</div>`;
+    if (zh && showZh) {
+      inner += raw ? `<div class="zh">${esc(zh)}</div>` : `<div class="txt">${esc(zh)}</div>`;
+    }
+    const textHTML = inner ? `<div class="${isMedia ? "cap" : ""}">${inner}</div>` : "";
     return `<div class="row ${side}">
       <div class="row-body" data-msg="${esc(m.id)}">
         <div class="bubble ${cls} ${isMedia ? "media" : ""}">${isMedia ? mediaHTML(m) : ""}${textHTML}</div>
@@ -435,6 +467,29 @@
     }
   }
 
+  function autoGrow(el, max) {
+    if (!el) return;
+    const fit = () => {
+      el.style.height = "auto";
+      const h = Math.min(el.scrollHeight + 2, max || window.innerHeight * 0.32);
+      el.style.height = Math.max(h, 96) + "px";
+    };
+    el.addEventListener("input", fit);
+    el.addEventListener("focus", fit);
+    setTimeout(fit, 0);
+    fit();
+  }
+
+  function countLines(el, out) {
+    if (!el || !out) return;
+    const upd = () => {
+      const v = el.value;
+      out.textContent = v ? `${v.split("\n").length} 行 · ${v.length} 字` : "0 字";
+    };
+    el.addEventListener("input", upd);
+    upd();
+  }
+
   async function openAddSheet(defaultArtistId) {
     const artists = S.artists;
     if (!artists.length) {
@@ -466,9 +521,21 @@
       </div>
       <div class="field"><label>发送时间</label><input type="datetime-local" id="fTime" value="${dstr}"></div>
       <div class="pane" id="paneText">
-        <textarea class="msg-input" id="fText" placeholder="粘贴从原 App 复制过来的文字…"></textarea>
+        <div class="field" style="margin-top:0"><label>原文（韩语 / 原 App 里的那句话）</label>
+          <textarea class="msg-input" id="fText" placeholder="粘贴从原 App 复制过来的文字…"></textarea>
+          <div class="ta-meta" id="cText">0 字</div>
+        </div>
+        <div class="field"><label>中文对照（可选，两行一起看）</label>
+          <textarea class="msg-input" id="fTextZh" placeholder="中文意思，留空就只存原文"></textarea>
+        </div>
       </div>
       <div class="pane" id="paneFile" hidden>
+        <div class="field" style="margin-top:0"><label>配文（可选）</label>
+          <textarea class="msg-input" id="fCap" style="min-height:70px" placeholder="原 App 里配的那句话"></textarea>
+        </div>
+        <div class="field"><label>配文中文对照（可选）</label>
+          <textarea class="msg-input" id="fCapZh" style="min-height:70px" placeholder="中文意思"></textarea>
+        </div>
         <button class="filepick" id="pickFile">
           <span id="pickIcon">${ICON.image}</span>
           <span id="pickLabel">选择图片</span>
@@ -477,12 +544,17 @@
         <input type="file" id="fFile" hidden>
         <div class="preview-list" id="filePrev"></div>
       </div>
-      <button class="btn save" id="saveMsg">保存到存档</button>
-      <p class="hint" id="addStatus" style="text-align:center;margin-top:8px"></p>
-      <p class="hint" style="text-align:center">图片会自动压缩缩略图留在手机${S.settings.clientId ? "，原图上传到 Google Drive" : "，原图先存在本地"}</p>
+      <div class="sheet-foot">
+        <button class="btn save" id="saveMsg">保存到存档</button>
+        <p class="hint" id="addStatus" style="text-align:center;margin-top:8px"></p>
+        <p class="hint" style="text-align:center">图片会自动压缩缩略图留在手机${S.settings.clientId ? "，原图上传到 Google Drive" : "，原图先存在本地"}</p>
+      </div>
     `);
 
     let saved = 0;
+    ["#fText", "#fTextZh"].forEach((id) => autoGrow($(id), window.innerHeight * 0.22));
+    ["#fCap", "#fCapZh"].forEach((id) => autoGrow($(id), window.innerHeight * 0.16));
+    countLines($("#fText"), $("#cText"));
 
     let role = "artist";
     let type = "text";
@@ -555,6 +627,7 @@
           role,
           type: "text",
           text,
+          textZh: $("#fTextZh").value.trim(),
           sentAt,
           createdAt: new Date().toISOString(),
           starred: false,
@@ -570,7 +643,10 @@
         }
         // 保持面板打开，方便连续粘贴下一条
         $("#fText").value = "";
+        $("#fTextZh").value = "";
         $("#fText").focus();
+        $("#cText").textContent = "0 字";
+        ["#fText", "#fTextZh"].forEach((id) => { $(id).style.height = ""; });
         $("#addStatus").textContent = `已存入 ${saved} 条，可以继续粘贴下一条`;
         toast("已存入存档");
         return;
@@ -589,7 +665,8 @@
           artistId,
           role,
           type,
-          text: "",
+          text: $("#fCap") ? $("#fCap").value.trim() : "",
+          textZh: $("#fCapZh") ? $("#fCapZh").value.trim() : "",
           sentAt: t,
           createdAt: new Date().toISOString(),
           starred: false,
@@ -882,14 +959,55 @@
     }
   }
 
+  /* ---------------- 编辑一条存档 ---------------- */
+  function openEditSheet(msg) {
+    closeSheet();
+    const d = new Date(msg.sentAt);
+    const val = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    setTimeout(() => {
+      openSheet(`
+        <h2>编辑这条存档</h2>
+        <div class="field" style="margin-top:0"><label>${msg.type === "text" ? "原文" : "配文"}（韩语 / 原文）</label>
+          <textarea class="msg-input" id="eText" placeholder="原文">${esc(msg.text || "")}</textarea>
+        </div>
+        <div class="field"><label>中文对照</label>
+          <textarea class="msg-input" id="eZh" placeholder="中文意思，可留空">${esc(msg.textZh || "")}</textarea>
+        </div>
+        <div class="field"><label>发送时间</label><input type="datetime-local" id="eTime" value="${val}"></div>
+        <div class="sheet-foot">
+          <button class="btn save" id="eSave">保存修改</button>
+          <button class="btn ghost" id="eCancel" style="margin-top:8px">取消</button>
+        </div>
+      `);
+      autoGrow($("#eText"), window.innerHeight * 0.22);
+      autoGrow($("#eZh"), window.innerHeight * 0.22);
+      $("#eCancel").onclick = closeSheet;
+      $("#eSave").onclick = async () => {
+        msg.text = $("#eText").value.trim();
+        msg.textZh = $("#eZh").value.trim();
+        const t = $("#eTime").value;
+        if (t) msg.sentAt = new Date(t).toISOString();
+        await DB.put("messages", msg);
+        closeSheet();
+        await loadChatMsgs();
+        renderChat(false);
+        await reloadAll();
+        renderChatHeader();
+        toast("已保存修改");
+      };
+    }, 240);
+  }
+
   /* ---------------- 长按菜单 ---------------- */
   function openMsgMenu(msg) {
     const sheet = openSheet(`
       <h2 style="margin-bottom:6px">这条存档</h2>
       <div class="menu">
         <button data-act="star">${msg.starred ? ICON.starFill : ICON.star}<span>${msg.starred ? "取消收藏" : "收藏"}</span></button>
-        ${msg.type === "text" ? `<button data-act="copy">${ICON.copy}<span>复制文字</span></button>` : ""}
-        <button data-act="time">${ICON.pencil}<span>修改时间</span></button>
+        <button data-act="edit">${ICON.pencil}<span>编辑文字 / 译文</span></button>
+        ${msg.type === "text" || msg.text ? `<button data-act="copy">${ICON.copy}<span>复制原文</span></button>` : ""}
+        ${msg.textZh ? `<button data-act="copyzh">${ICON.copy}<span>复制中文对照</span></button>` : ""}
+        <button data-act="time">${ICON.clock}<span>修改时间</span></button>
         ${msg.type !== "text" && driveIdOf(msg) ? `<button data-act="download">${ICON.download}<span>从云端下载原文件</span></button>` : ""}
         <button data-act="delete" class="danger">${ICON.trash}<span>删除这一条</span></button>
       </div>
@@ -903,6 +1021,16 @@
         await DB.put("messages", msg);
         closeSheet();
         S.onlyStar ? renderChat(false) : renderChat(false);
+      } else if (act === "edit") {
+        openEditSheet(msg);
+      } else if (act === "copyzh") {
+        try {
+          await navigator.clipboard.writeText(msg.textZh || "");
+          toast("已复制中文");
+        } catch (err) {
+          toast("复制失败");
+        }
+        closeSheet();
       } else if (act === "copy") {
         try {
           await navigator.clipboard.writeText(msg.text);
@@ -957,7 +1085,7 @@
     v.hidden = false;
     body.innerHTML = `<div class="vloading"><span class="spinner"></span>正在读取…</div>`;
     let blob = null;
-    if (msg.media && msg.media.full) blob = msg.media.full;
+    if (msg.media && asBlob(msg.media.full)) blob = msg.media.full;
     else if (driveIdOf(msg)) {
       if (!Drive.getClientId()) {
         body.innerHTML = `<div class="vloading">这个原文件在 Google Drive 上<br>先在设置里连接云端</div>`;
@@ -969,7 +1097,7 @@
         body.innerHTML = `<div class="vloading">读取失败：${esc(e.message)}<br>检查网络或重新连接云端</div>`;
         return;
       }
-    } else if (msg.media && msg.media.thumb) {
+    } else if (msg.media && asBlob(msg.media.thumb)) {
       blob = msg.media.thumb;
     }
     if (!blob) {
@@ -985,7 +1113,7 @@
       body.innerHTML = `<audio src="${u}" controls autoplay style="width:min(86vw,420px)"></audio>`;
     }
     // 从云端取回原图后，顺手补一张缩略图存回本地（导入备份后特别有用）
-    if ((msg.type === "image" || msg.type === "video") && (!msg.media.thumb || !msg.media.w)) healThumb(msg, blob);
+    if ((msg.type === "image" || msg.type === "video") && (!asBlob(msg.media.thumb) || !msg.media.w)) healThumb(msg, blob);
   }
 
   async function healThumb(msg, blob) {
@@ -1169,12 +1297,7 @@
         version: 1,
         exportedAt: new Date().toISOString(),
         artists: artists.map((a) => ({ ...a, avatarThumb: null })),
-        messages: messages.map((m) => ({
-          ...m,
-          media: m.media
-            ? { thumb: null, full: null, name: m.media.name, mime: m.media.mime, size: m.media.size, w: m.media.w, h: m.media.h, duration: m.media.duration, waves: m.media.waves }
-            : null,
-        })),
+        messages: messages.map(stripMedia),
       };
       downloadJSON(payload, `泡泡存档-${new Date().toISOString().slice(0, 10)}.json`);
       toast("已导出");
@@ -1189,10 +1312,20 @@
         if (!data.messages) throw new Error("格式不对");
         const artists = await DB.all("artists");
         const ids = new Set(artists.map((a) => a.id));
-        const newArtists = (data.artists || []).filter((a) => !ids.has(a.id));
+        // 兼容两种备份：整库导出（artists 数组）和单个对话导出（artist 单数）
+        const incoming = data.artists || (data.artist ? [data.artist] : []);
+        const newArtists = incoming.filter((a) => a && a.id && !ids.has(a.id));
         const messages = await DB.all("messages");
         const mids = new Set(messages.map((m) => m.id));
-        const newMsgs = (data.messages || []).filter((m) => !mids.has(m.id));
+        const newMsgs = (data.messages || [])
+          .filter((m) => !mids.has(m.id))
+          .map((m) => {
+            if (!m.media) return m;
+            const media = { ...m.media };
+            if (!(media.thumb instanceof Blob)) media.thumb = null;
+            if (!(media.full instanceof Blob)) media.full = null;
+            return { ...m, media };
+          });
         await DB.putMany("artists", newArtists);
         await DB.putMany("messages", newMsgs);
         await reloadAll();
@@ -1246,6 +1379,7 @@
     const sheet = openSheet(`
       <h2>${esc(a.name)}</h2>
       <div class="menu">
+        <button data-act="zh-toggle">${ICON.lang}<span>${S.settings.showZh === false ? "显示中文对照" : "只看原文（隐藏中文）"}</span></button>
         <button data-act="star-filter">${ICON.star}<span>${S.onlyStar ? "显示全部消息" : "只看收藏"}</span></button>
         <button data-act="edit">${ICON.pencil}<span>改名 / 换头像</span></button>
         <button data-act="export">${ICON.download}<span>导出这段存档</span></button>
@@ -1255,7 +1389,13 @@
       const b = e.target.closest(".menu button");
       if (!b) return;
       const act = b.dataset.act;
-      if (act === "star-filter") {
+      if (act === "zh-toggle") {
+        S.settings.showZh = S.settings.showZh === false ? true : false;
+        await saveSettings();
+        closeSheet();
+        renderChat(false);
+        toast(S.settings.showZh ? "已显示中文对照" : "已隐藏中文对照");
+      } else if (act === "star-filter") {
         S.onlyStar = !S.onlyStar;
         closeSheet();
         renderChatHeader();
@@ -1266,7 +1406,7 @@
       } else if (act === "export") {
         closeSheet();
         const messages = await DB.byIndex("messages", "artistId", a.id);
-        downloadJSON({ app: "bubble-archive", artist: a, messages }, `${a.name}-存档.json`);
+        downloadJSON({ app: "bubble-archive", artist: a, artistRef: a, messages: messages.map(stripMedia) }, `${a.name}-存档.json`);
         toast("已导出");
       } else if (act === "delete") {
         if (!confirm(`删除「${a.name}」的全部存档？（云端文件不会删除）`)) return;
@@ -1438,20 +1578,20 @@
     const voiceThumb = await placeholderThumb("voice", 14);
 
     const msgs = [
-      ["d1", "artist", "text", "오늘 연습 끝났어! 今天练完舞啦，腿都在抖 🥲", daysAgo(2, 21, 12)],
-      ["d1", "artist", "text", "不过新歌的编舞真的很好看，等你们看到一定会喜欢的", daysAgo(2, 21, 13)],
-      ["d1", "me", "text", "辛苦啦！记得好好吃饭 🍚", daysAgo(2, 21, 20)],
-      ["d1", "artist", "text", "吃了吃了，今天吃了炸鸡哈哈", daysAgo(2, 21, 26)],
+      ["d1", "artist", "text", "오늘 연습 끝났어! 다리 다 풀렸어 🥲", daysAgo(2, 21, 12), "今天练完舞啦，腿都要断了 🥲"],
+      ["d1", "artist", "text", "근데 신곡 안무 진짜 예쁘더라. 너희가 보면 좋아할 거야", daysAgo(2, 21, 13), "不过新歌的编舞真的很好看，等你们看到一定会喜欢的"],
+      ["d1", "me", "text", "辛苦啦！记得好好吃饭 🍚", daysAgo(2, 21, 20), "수고했어! 밥 꼭 챙겨 먹어 🍚"],
+      ["d1", "artist", "text", "먹었지! 오늘 치킨 먹었어 ㅎㅎ", daysAgo(2, 21, 26), "吃了吃了，今天吃了炸鸡哈哈"],
       ["d1", "artist", "image", "", daysAgo(1, 20, 3)],
-      ["d1", "artist", "text", "今天的天空 ☁️ 拍给你们看", daysAgo(1, 20, 4)],
+      ["d1", "artist", "text", "오늘 하늘 ☁️ 너희한테 보여주려고", daysAgo(1, 20, 4), "今天的天空 ☁️ 拍给你们看"],
       ["d1", "artist", "voice", "", daysAgo(1, 20, 9)],
-      ["d1", "artist", "text", "晚安，做个好梦 🌙", daysAgo(0, 0, 40)],
-      ["d2", "artist", "text", "在飞机上，刚落地日本 🇯🇵", daysAgo(1, 9, 15)],
+      ["d1", "artist", "text", "잘 자, 좋은 꿈 꿔 🌙", daysAgo(0, 0, 40), "晚安，做个好梦 🌙"],
+      ["d2", "artist", "text", "비행기에서 막 일본 도착했어 🇯🇵", daysAgo(1, 9, 15), "在飞机上，刚落地日本 🇯🇵"],
       ["d2", "artist", "image", "", daysAgo(1, 9, 16)],
-      ["d2", "artist", "text", "今天好冷，你们那边呢？", daysAgo(1, 9, 17)],
+      ["d2", "artist", "text", "오늘 너무 추운데, 너희 쪽은 어때?", daysAgo(1, 9, 17), "今天好冷，你们那边呢？"],
       ["d2", "me", "text", "北京也降温了，多穿点", daysAgo(1, 10, 2)],
-      ["d3", "artist", "text", "第一次在这里留言，有点紧张 😳", daysAgo(0, 13, 5)],
-      ["d3", "artist", "text", "以后会常来的！", daysAgo(0, 13, 6)],
+      ["d3", "artist", "text", "여기 처음 남겨보는데 좀 떨려 😳", daysAgo(0, 13, 5), "第一次在这里留言，有点紧张 😳"],
+      ["d3", "artist", "text", "앞으로 자주 올게!", daysAgo(0, 13, 6), "以后会常来的！"],
     ];
 
     const records = msgs.map((m, i) => {
@@ -1461,6 +1601,7 @@
         role: m[1],
         type: m[2],
         text: m[3],
+        textZh: m[5] || "",
         sentAt: m[4],
         createdAt: m[4],
         starred: i === 4,
