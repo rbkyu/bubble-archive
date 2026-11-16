@@ -1009,7 +1009,8 @@
       <h2 style="margin-bottom:6px">这条存档</h2>
       <div class="menu">
         <button data-act="star">${msg.starred ? ICON.starFill : ICON.star}<span>${msg.starred ? "取消收藏" : "收藏"}</span></button>
-        <button data-act="edit">${ICON.pencil}<span>编辑文字 / 译文</span></button>
+        ${msg.type !== "text" ? `<button data-act="view">${ICON.image}<span>${msg.type === "image" ? "查看原图" : msg.type === "video" ? "播放视频" : "播放语音"}</span></button>` : ""}
+        <button data-act="edit">${ICON.pencil}<span>编辑${msg.type === "text" ? "文字" : "配文"} / 译文</span></button>
         ${msg.type === "text" || msg.text ? `<button data-act="copy">${ICON.copy}<span>复制原文</span></button>` : ""}
         ${msg.textZh ? `<button data-act="copyzh">${ICON.copy}<span>复制中文对照</span></button>` : ""}
         <button data-act="time">${ICON.clock}<span>修改时间</span></button>
@@ -1026,6 +1027,9 @@
         await DB.put("messages", msg);
         closeSheet();
         S.onlyStar ? renderChat(false) : renderChat(false);
+      } else if (act === "view") {
+        closeSheet();
+        setTimeout(() => openViewer(msg), 220);
       } else if (act === "edit") {
         openEditSheet(msg);
       } else if (act === "copyzh") {
@@ -1491,6 +1495,12 @@
       if (m) openViewer(m);
     });
 
+    // 长按图片时不要弹系统"保存图片/查看图片"菜单
+    msgList.addEventListener("contextmenu", (e) => {
+      if (e.target.closest(".row-body")) e.preventDefault();
+    });
+    msgList.addEventListener("dragstart", (e) => e.preventDefault());
+
     let mpTimer = null;
     msgList.addEventListener("pointerdown", (e) => {
       const row = e.target.closest(".row-body");
@@ -1515,6 +1525,10 @@
       $("#viewer").hidden = true;
       $("#vbody").innerHTML = "";
     };
+    $("#vEdit") &&
+      ($("#vEdit").onclick = () => {
+        if (S.viewerMsg) openEditSheet(S.viewerMsg);
+      });
     $("#vDownload").onclick = () => {
       if (S.viewerMsg) fetchAndDownload(S.viewerMsg);
     };

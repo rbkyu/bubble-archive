@@ -21,6 +21,15 @@
 /* 内联图标默认尺寸，避免 SVG 撑爆布局（下面的具体规则可覆盖） */
 svg { width: 16px; height: 16px; flex: none; }
 
+/* 图片不接收指针事件：长按由我们的菜单接管，而不是系统"保存图片" */
+img {
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
+  user-select: none;
+  pointer-events: none;
+}
+.bubble, .row-body { -webkit-touch-callout: none; }
+
 html, body {
   margin: 0;
   padding: 0;
@@ -362,7 +371,7 @@ main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .stat-row b { font-variant-numeric: tabular-nums; font-weight: 650; }
 
 /* ---------- sheet ---------- */
-.sheet-wrap { position: fixed; inset: 0; z-index: 60; }
+.sheet-wrap { position: fixed; inset: 0; z-index: 92; }
 .sheet-wrap[hidden] { display: none; }
 .sheet-bg { position: absolute; inset: 0; background: rgba(18, 16, 36, 0.36); animation: fadein 0.2s ease; }
 @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
