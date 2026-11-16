@@ -70,12 +70,14 @@
     </header>
     <div class="msg-list" id="msgList"></div>
     <div class="chat-foot">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10.5" width="16" height="10" rx="3"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg>
-      存档模式 · 只读，内容不会发送到原 App
+      <div class="foot-note">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10.5" width="16" height="10" rx="3"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg>
+        <span>存档模式 · 只读，内容不会发到原 App</span>
+      </div>
+      <button class="foot-add" id="fabAdd" aria-label="添加存档">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
     </div>
-    <button class="fab" id="fabAdd" aria-label="添加存档">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-    </button>
   </section>
 
   <!-- ============ 设置页 ============ -->

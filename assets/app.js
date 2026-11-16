@@ -386,11 +386,16 @@
   /* ---------------- 添加存档 ---------------- */
   function openSheet(html, opts = {}) {
     const wrap = $("#sheetWrap");
-    $("#sheet").innerHTML = `<div class="grabber"></div><button class="icon-btn sheet-close" id="sheetClose" aria-label="关闭">${ICON.x}</button>${html}`;
+    // 每次都换一个新的 #sheet 节点：旧节点上挂过的 click 监听随它一起丢掉，
+    // 否则长按菜单开过的次数越多，点一次按钮就会重复触发几次
+    const fresh = document.getElementById("sheet").cloneNode(false);
+    document.getElementById("sheet").replaceWith(fresh);
+    fresh.innerHTML = `<div class="grabber"></div><button class="icon-btn sheet-close" id="sheetClose" aria-label="关闭">${ICON.x}</button>${html}`;
     wrap.hidden = false;
-    $("#sheet").style.maxHeight = opts.tall === false ? "70%" : "90%";
+    fresh.style.maxHeight = opts.tall === false ? "70%" : "90%";
+    fresh.scrollTop = 0;
     $("#sheetClose").onclick = closeSheet;
-    return $("#sheet");
+    return fresh;
   }
   function closeSheet() {
     $("#sheetWrap").hidden = true;
