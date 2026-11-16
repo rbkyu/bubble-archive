@@ -1,0 +1,17 @@
+{
+  "name": "泡泡存档",
+  "short_name": "泡泡存档",
+  "description": "只属于你的泡泡存档：把喜欢的艺人消息、图片、视频留在自己手里。",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f3f4f9",
+  "theme_color": "#f3f4f9",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
