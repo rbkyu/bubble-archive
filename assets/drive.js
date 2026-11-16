@@ -202,6 +202,23 @@
     return (await res.json()).id;
   }
 
+  /* 删除云端的文件（只能删本 App 创建的；会进 Drive 回收站） */
+  async function remove(fileId) {
+    const tok = await ensureToken(true);
+    const res = await fetch(`${API}/files/${encodeURIComponent(fileId)}`, {
+      method: "DELETE",
+      headers: { Authorization: "Bearer " + tok },
+    });
+    if (!res.ok && res.status !== 404) {
+      let t = "";
+      try {
+        t = (await res.text()).slice(0, 120);
+      } catch (e) {}
+      throw new Error("删除云端文件失败：" + (t || res.status));
+    }
+    return true;
+  }
+
   async function fetchBlob(fileId) {
     const res = await api(`/files/${encodeURIComponent(fileId)}?alt=media`);
     if (!res.ok) throw new Error("读取云端文件失败");
@@ -235,6 +252,7 @@
       return ensureFolder(name, parentId);
     },
     upload,
+    remove,
     fetchBlob,
     async about() {
       const res = await api("/about?fields=user(emailAddress,displayName),storageQuota(usage,limit)");

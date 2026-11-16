@@ -278,9 +278,6 @@
   function renderChatHeader() {
     const a = S.artist;
     $("#chatHead").innerHTML = `
-      <div class="avatar s40" style="background:linear-gradient(150deg,${colorOf(a.name)})">
-        ${a.avatarThumb ? `<img src="${blobUrl("av" + a.id, a.avatarThumb)}" alt="">` : esc((a.name || "?").slice(0, 1))}
-      </div>
       <div style="min-width:0">
         <div class="ch-name">${esc(a.name)}</div>
         <div class="ch-sub">${a.group ? esc(a.group) + " · " : ""}${S.msgs.length} 条存档${
@@ -321,7 +318,7 @@
     return "";
   }
 
-  function msgHTML(m) {
+  function msgHTML(m, showHead) {
     const side = m.role === "me" ? "right" : "left";
     const cls = m.role === "me" ? "me" : "artist";
     const isMedia = m.type !== "text";
@@ -342,8 +339,27 @@
       inner += raw ? `<div class="zh">${esc(zh)}</div>` : `<div class="txt">${esc(zh)}</div>`;
     }
     const textHTML = inner ? `<div class="${isMedia ? "cap" : ""}">${inner}</div>` : "";
+    const a = S.artist || {};
+    const avHTML =
+      side === "left"
+        ? `<div class="row-av ${showHead ? "" : "spacer"}" style="background:linear-gradient(150deg,${colorOf(a.name || "")})">${
+            a.avatarThumb && showHead
+              ? `<img src="${blobUrl("av" + a.id, a.avatarThumb)}" alt="">`
+              : showHead
+              ? esc((a.name || "?").slice(0, 1))
+              : ""
+          }</div>`
+        : "";
+    const nameHTML =
+      side === "left" && showHead
+        ? `<div class="row-label"><span class="badge-artist">ARTIST</span><span class="lb-name">${esc(
+            a.name || ""
+          )}</span></div>`
+        : "";
     return `<div class="row ${side}">
+      ${avHTML}
       <div class="row-body" data-msg="${esc(m.id)}">
+        ${nameHTML}
         <div class="bubble ${cls} ${isMedia ? "media" : ""}">${isMedia ? mediaHTML(m) : ""}${textHTML}</div>
         <div class="row-meta"><span>${fmtClock(m.sentAt)}</span>${star}${sync}</div>
       </div>
@@ -363,7 +379,7 @@
         html += `<div class="day-pill">${fmtDayLabel(m.sentAt)}</div>`;
         lastDay = k;
       }
-      html += msgHTML(m);
+      html += msgHTML(m, m.role !== "me");
     });
     if (!list.length) {
       html = `<div class="empty"><span class="em-ico">${S.onlyStar ? "★" : "🫧"}</span>${
@@ -1119,14 +1135,66 @@
         closeSheet();
         fetchAndDownload(msg);
       } else if (act === "delete") {
-        if (!confirm("删除这一条？云端文件不会被删除")) return;
+        closeSheet();
+        setTimeout(() => openDeleteSheet(msg), 240);
+      }
+    });
+  }
+
+  /* 删除确认：可选是否连云端原文件一起删 */
+  async function afterDelete() {
+    await loadChatMsgs();
+    renderChat(false);
+    await reloadAll();
+    renderChatHeader();
+  }
+
+  function openDeleteSheet(msg) {
+    const cloudId = driveIdOf(msg);
+    const typeLabel = msg.type === "image" ? "图片" : msg.type === "video" ? "视频" : msg.type === "voice" ? "语音" : "文字";
+    const media = msg.media || {};
+    const sizeTxt = media.size ? fmtSize(media.size) : "";
+    const sheet = openSheet(`
+      <h2 style="margin-bottom:6px">删除这条存档？</h2>
+      <p class="hint">${typeLabel}${sizeTxt ? " · " + sizeTxt : ""}${
+      msg.sentAt ? " · " + fmtClock(msg.sentAt) : ""
+    }</p>
+      <div class="menu" style="margin-top:10px">
+        <button data-del="local">${ICON.trash}<span>只删这条存档（云端保留）</span></button>
+        ${cloudId ? `<button data-del="cloud" class="danger">${ICON.trash}<span>连 Drive 原文件一起删</span></button>` : ""}
+      </div>
+      <p class="hint" style="margin-top:8px">${
+        cloudId
+          ? "只删存档：Drive 里的原文件保留，以后还能重新取回。一起删：原文件会进 Drive 回收站（一般 30 天内可恢复）。"
+          : "这条没有云端文件，删掉就没了。"
+      }</p>
+    `);
+    sheet.addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-del]");
+      if (!b) return;
+      const mode = b.dataset.del;
+      if (mode === "cloud") {
+        const label = b.innerHTML;
+        b.disabled = true;
+        b.textContent = "正在删除云端…";
+        try {
+          await Drive.connect();
+          await Drive.remove(cloudId);
+        } catch (err) {
+          toast("云端删除失败：" + (err.message || err), 3200);
+          b.disabled = false;
+          b.innerHTML = label;
+          return;
+        }
         await DB.del("messages", msg.id);
         closeSheet();
-        await loadChatMsgs();
-        renderChat(false);
-        await reloadAll();
-        renderChatHeader();
-        toast("已删除");
+        await afterDelete();
+        toast("已删除（含云端原文件）");
+      } else {
+        await DB.del("messages", msg.id);
+        closeSheet();
+        await afterDelete();
+        toast(cloudId ? "已删除存档（云端原文件保留）" : "已删除");
       }
     });
   }
