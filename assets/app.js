@@ -1607,6 +1607,122 @@
   }
 
   /* ---------------- 对话页右上菜单 ---------------- */
+  /* ---------------- 按日期查找 ---------------- */
+  const WEEK_CN = ["一", "二", "三", "四", "五", "六", "日"];
+
+  function openCalendar() {
+    const list = S.msgs;
+    if (!list.length) return toast("还没有存档");
+    const counts = {};
+    list.forEach((m) => {
+      const k = dayKey(m.sentAt);
+      counts[k] = (counts[k] || 0) + 1;
+    });
+    // 初始月份：当前列表可见的第一条所在月
+    let anchor = list[list.length - 1];
+    const rows = [...document.querySelectorAll("#msgList [data-msg]")];
+    const vm = $("#msgList");
+    const firstVis = rows.find((r) => r.offsetTop + r.offsetHeight > vm.scrollTop + 30);
+    if (firstVis) {
+      const m = list.find((x) => x.id === firstVis.dataset.msg);
+      if (m) anchor = m;
+    }
+    const ad = d2(anchor.sentAt);
+    let cur = new Date(ad.getFullYear(), ad.getMonth(), 1);
+    const todayKey = dayKey(new Date().toISOString());
+
+    const sheet = openSheet(`
+      <h2 style="margin-bottom:2px">按日期查找</h2>
+      <p class="hint" style="margin-bottom:6px">有圆点的日期有存档，点一下直接跳过去。</p>
+      <div class="cal-head">
+        <button class="cal-nav" id="calPrev" aria-label="上个月"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m14.5 5-6.5 7 6.5 7"/></svg></button>
+        <div class="cal-title" id="calTitle"></div>
+        <button class="cal-nav" id="calNext" aria-label="下个月"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m9.5 5 6.5 7-6.5 7"/></svg></button>
+      </div>
+      <div class="cal-grid" id="calGrid"></div>
+      <div class="cal-foot">
+        <span class="hint" id="calInfo"></span>
+        <div class="btn-row" style="margin-top:8px">
+          <button class="btn ghost" id="calEarliest">最早</button>
+          <button class="btn ghost" id="calLatest">最近</button>
+        </div>
+        <p class="hint" id="calRange" style="margin-top:6px;text-align:center"></p>
+      </div>
+    `);
+
+    const renderCal = () => {
+      const y = cur.getFullYear();
+      const mo = cur.getMonth();
+      $("#calTitle").textContent = `${y}年${mo + 1}月`;
+      const first = new Date(y, mo, 1);
+      const offset = (first.getDay() + 6) % 7; // 周一开头
+      const last = new Date(y, mo + 1, 0).getDate();
+      let html = WEEK_CN.map((w) => `<div class="cal-w">${w}</div>`).join("");
+      for (let i = 0; i < offset; i++) html += `<button class="cal-d blank" disabled></button>`;
+      for (let d = 1; d <= last; d++) {
+        const k = `${y}-${pad(mo + 1)}-${pad(d)}`;
+        const n = counts[k];
+        const cls = ["cal-d", n ? "has" : "", k === todayKey ? "today" : ""].join(" ");
+        html += `<button class="${cls}" data-d="${k}">${d}${
+          k === todayKey ? `<small>TODAY</small>` : ""
+        }</button>`;
+      }
+      $("#calGrid").innerHTML = html;
+      const monthCount = Object.keys(counts).filter((k) => k.startsWith(`${y}-${pad(mo + 1)}`)).length;
+      $("#calInfo").textContent = monthCount ? `这个月 ${monthCount} 天有存档` : "这个月没有存档";
+    };
+    renderCal();
+
+    const dayKeys = Object.keys(counts).sort();
+    const earliest = dayKeys[0];
+    const latest = dayKeys[dayKeys.length - 1];
+    const dOf = (k) => {
+      const [y, m] = k.split("-").map(Number);
+      return new Date(y, m - 1, 1);
+    };
+    $("#calRange").textContent = `最早的一条：${earliest.replace(/-/g, ".")}`;
+
+    const shift = (n) => {
+      const d = new Date(cur.getFullYear(), cur.getMonth() + n, 1);
+      const far = n < 0 ? d < new Date(2020, 0, 1) : false;
+      cur = d;
+      renderCal();
+    };
+    $("#calPrev").onclick = () => shift(-1);
+    $("#calNext").onclick = () => shift(1);
+    $("#calEarliest").onclick = () => {
+      cur = dOf(earliest);
+      renderCal();
+    };
+    $("#calLatest").onclick = () => {
+      cur = dOf(latest);
+      renderCal();
+    };
+
+    $("#calGrid").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-d]");
+      if (!b || b.disabled) return;
+      const k = b.dataset.d;
+      const n = counts[k] || 0;
+      if (!n) return toast("这天没有存档");
+      const target = list.find((m) => dayKey(m.sentAt) === k);
+      closeSheet();
+      setTimeout(() => {
+        const el = document.querySelector(`#msgList [data-msg="${target.id}"]`);
+        if (!el) return toast("找不到这条，试试刷新");
+        const vm2 = $("#msgList");
+        const row = el.closest(".row") || el;
+        const prev = row.previousElementSibling;
+        const anchorEl = prev && prev.classList.contains("day-pill") ? prev : row;
+        const listTop = vm2.getBoundingClientRect().top;
+        const anchorTop = anchorEl.getBoundingClientRect().top;
+        vm2.scrollTop = Math.max(0, vm2.scrollTop + (anchorTop - listTop) - 10);
+        row.classList.add("flash");
+        setTimeout(() => row.classList.remove("flash"), 1800);
+      }, 240);
+    });
+  }
+
   function openChatMenu() {
     const a = S.artist;
     const sheet = openSheet(`
@@ -1664,6 +1780,7 @@
     $("#btnBack") && ($("#btnBack").onclick = goHome);
     $("#btnSetBack") && ($("#btnSetBack").onclick = goHome);
     $("#btnChatMenu") && ($("#btnChatMenu").onclick = openChatMenu);
+    $("#btnCal") && ($("#btnCal").onclick = openCalendar);
     $("#fabAdd") && ($("#fabAdd").onclick = () => openAddSheet(S.artist ? S.artist.id : null));
 
     const search = $("#searchInput");
