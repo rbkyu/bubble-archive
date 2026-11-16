@@ -922,6 +922,52 @@
     if (S.view === "settings") renderSettings();
   }
 
+  /* 手动备份：把整库 JSON 传到 Drive 的「泡泡存档/备份」 */
+  async function backupToDrive() {
+    if (!Drive.getClientId()) {
+      toast("先在上面填 OAuth 客户端 ID 并连接");
+      return;
+    }
+    const btn = $("#btnBackupCloud");
+    const label = btn ? btn.textContent : "";
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "正在备份…";
+    }
+    try {
+      toast("正在连接云端…", 1200);
+      await Drive.connect();
+      const artists = await DB.all("artists");
+      const messages = await DB.all("messages");
+      const payload = {
+        app: "bubble-archive",
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        artists,
+        messages: messages.map(stripMedia),
+      };
+      const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+      const root = S.settings.rootFolderId || (await Drive.ensureFolder("泡泡存档", null));
+      S.settings.rootFolderId = root;
+      const dir = await Drive.ensureFolder("备份", root);
+      S.settings.backupFolderId = dir;
+      const d = new Date();
+      const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
+      await Drive.upload(blob, { name: `存档备份-${stamp}.json`, mime: "application/json", parentId: dir });
+      S.settings.lastBackup = new Date().toISOString();
+      S.settings.lastBackupCount = messages.length;
+      await saveSettings();
+      toast(`已备份 ${artists.length} 位艺人、${messages.length} 条（${fmtSize(blob.size)}）`, 2800);
+      renderSettings();
+    } catch (e) {
+      toast("备份失败：" + (e.message || e), 3200);
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = label;
+      }
+    }
+  }
+
   async function syncAll(interactive) {
     if (!Drive.getClientId()) {
       toast("先在设置里填 OAuth 客户端 ID");
@@ -1186,6 +1232,12 @@
     const pending = msgs.filter((m) => m.syncState === "pending" && m.media && m.media.full).length;
     const localFull = msgs.filter((m) => m.media && m.media.full).reduce((a, m) => a + ((m.media.full && m.media.full.size) || 0), 0);
     const connected = Drive.ready();
+    const lastBk = S.settings.lastBackup ? new Date(S.settings.lastBackup) : null;
+    const bkText = lastBk
+      ? `上次手动备份：${lastBk.getFullYear()}-${pad(lastBk.getMonth() + 1)}-${pad(lastBk.getDate())} ${pad(lastBk.getHours())}:${pad(
+          lastBk.getMinutes()
+        )}（包含 ${S.settings.lastBackupCount || 0} 条存档）`
+      : "还没有备份过。建议存完一批就手动点一次。";
 
     el.innerHTML = `
       <div class="card">
@@ -1221,12 +1273,17 @@
       </div>
 
       <div class="card">
-        <h3>${ICON.copy}数据备份</h3>
-        <p class="hint">导出一个 JSON（文字 + 时间 + 云端文件 ID），换手机时导入即可恢复；原图仍在你的 Google Drive。</p>
+        <h3>${ICON.copy}数据备份（手动）</h3>
+        <p class="hint">只在你点的时候才备份。会把「艺人 + 文字 + 时间 + 中韩对照 + 云端文件 ID」打包成一份 JSON，传到 Drive 的「泡泡存档/备份」里；图片原文件本来就在云端，不会重复传。</p>
         <div class="btn-row">
-          <button class="btn secondary" id="btnExport">导出 JSON</button>
-          <button class="btn secondary" id="btnImport">导入 JSON</button>
+          <button class="btn" id="btnBackupCloud">现在备份到 Drive</button>
         </div>
+        <div class="btn-row">
+          <button class="btn secondary" id="btnExport">导出到手机</button>
+          <button class="btn secondary" id="btnImport">从 JSON 导入</button>
+        </div>
+        <p class="hint" id="backupHint">${bkText}</p>
+        ${S.settings.backupFolderId ? `<div class="btn-row"><button class="btn ghost" id="btnOpenBackup">打开备份文件夹 ${ICON.link}</button></div>` : ""}
         <input type="file" id="fImport" accept="application/json,.json" hidden>
       </div>
 
@@ -1240,7 +1297,7 @@
 
       <div class="card">
         <h3>关于</h3>
-        <p class="hint">泡泡存档 v1.0 · 纯单机，不连原 App<br>只读存档：内容只属于你，不会发送给任何人。</p>
+        <p class="hint">泡泡存档 v1.3.2 · 纯单机，不连原 App<br>只读存档：内容只属于你，不会发送给任何人。</p>
       </div>
     `;
 
@@ -1267,6 +1324,13 @@
     };
 
     $("#btnSyncNow").onclick = () => syncAll(true);
+
+    $("#btnBackupCloud").onclick = backupToDrive;
+    const openBackup = $("#btnOpenBackup");
+    if (openBackup)
+      openBackup.onclick = () => {
+        window.open(Drive.folderLink(S.settings.backupFolderId), "_blank");
+      };
 
     const openDrive = $("#btnOpenDrive");
     if (openDrive)
