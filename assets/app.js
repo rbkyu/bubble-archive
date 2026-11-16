@@ -339,16 +339,23 @@
       inner += raw ? `<div class="zh">${esc(zh)}</div>` : `<div class="txt">${esc(zh)}</div>`;
     }
     const textHTML = inner ? `<div class="${isMedia ? "cap" : ""}">${inner}</div>` : "";
+    const q = m.quote;
+    const quoteHTML =
+      q && q.text
+        ? `<div class="quote"><div class="q-head">${
+            q.type === "me" ? "回复给 " + esc(q.name || "我") : "ARTIST的回复"
+          }</div><div class="q-txt">${esc(q.text)}</div>${
+            q.textZh && showZh ? `<div class="q-zh">${esc(q.textZh)}</div>` : ""
+          }</div><div class="q-line"></div>`
+        : "";
     const a = S.artist || {};
     const avHTML =
       side === "left"
-        ? `<div class="row-av ${showHead ? "" : "spacer"}" style="background:linear-gradient(150deg,${colorOf(a.name || "")})">${
-            a.avatarThumb && showHead
+        ? `<div class="row-av"><span class="av-in" style="background:linear-gradient(150deg,${colorOf(a.name || "")})">${
+            a.avatarThumb
               ? `<img src="${blobUrl("av" + a.id, a.avatarThumb)}" alt="">`
-              : showHead
-              ? esc((a.name || "?").slice(0, 1))
-              : ""
-          }</div>`
+              : esc((a.name || "?").slice(0, 1))
+          }</span></div>`
         : "";
     const nameHTML =
       side === "left" && showHead
@@ -360,7 +367,9 @@
       ${avHTML}
       <div class="row-body" data-msg="${esc(m.id)}">
         ${nameHTML}
-        <div class="bubble ${cls} ${isMedia ? "media" : ""}">${isMedia ? mediaHTML(m) : ""}${textHTML}</div>
+        <div class="bubble ${cls} ${isMedia ? "media" : ""}${quoteHTML ? " has-quote" : ""}">${
+          isMedia ? mediaHTML(m) : ""
+        }${quoteHTML}${textHTML}</div>
         <div class="row-meta"><span>${fmtClock(m.sentAt)}</span>${star}${sync}</div>
       </div>
     </div>`;
@@ -549,14 +558,28 @@
         <div class="field"><label>中文对照（可选，两行一起看）</label>
           <textarea class="msg-input" id="fTextZh" placeholder="中文意思，留空就只存原文"></textarea>
         </div>
+        <div id="quoteBox" hidden>
+          <div class="field" style="margin-top:0"><label>这条是不是引用某条消息的回复？</label>
+            <div class="seg" id="segQuote">
+              <button data-v="none" class="on">不是</button>
+              <button data-v="fan">引用粉丝</button>
+              <button data-v="me">回复我</button>
+            </div>
+          </div>
+          <div id="quotePane" hidden>
+            <div class="field" id="myNameField" hidden><label>我的昵称（显示成「回复给 …」）</label>
+              <input id="fMyName" placeholder="例如 umji" value="${esc(S.settings.myName || "")}">
+            </div>
+            <div class="field"><label>被引用的那句话（原文）</label>
+              <textarea class="msg-input" id="fQText" style="min-height:60px" placeholder="例如：아직도 외계인인가👽"></textarea>
+            </div>
+            <div class="field"><label>被引用中文对照（可选）</label>
+              <textarea class="msg-input" id="fQZh" style="min-height:60px" placeholder="中文意思"></textarea>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="pane" id="paneFile" hidden>
-        <div class="field" style="margin-top:0"><label>配文（可选）</label>
-          <textarea class="msg-input" id="fCap" style="min-height:70px" placeholder="原 App 里配的那句话"></textarea>
-        </div>
-        <div class="field"><label>配文中文对照（可选）</label>
-          <textarea class="msg-input" id="fCapZh" style="min-height:70px" placeholder="中文意思"></textarea>
-        </div>
         <button class="filepick" id="pickFile">
           <span id="pickIcon">${ICON.image}</span>
           <span id="pickLabel">选择图片</span>
@@ -574,17 +597,31 @@
 
     let saved = 0;
     ["#fText", "#fTextZh"].forEach((id) => autoGrow($(id), window.innerHeight * 0.22));
-    ["#fCap", "#fCapZh"].forEach((id) => autoGrow($(id), window.innerHeight * 0.16));
     countLines($("#fText"), $("#cText"));
 
     let role = "artist";
     let type = "text";
     let files = [];
 
+    let quoteType = "none";
+    const setQuote = (v) => {
+      quoteType = v;
+      $$("#segQuote button").forEach((b) => b.classList.toggle("on", b.dataset.v === v));
+      $("#quotePane").hidden = v === "none";
+      $("#myNameField").hidden = v !== "me";
+    };
     const setRole = (v) => {
       role = v;
       $$("#segRole button").forEach((b) => b.classList.toggle("on", b.dataset.v === v));
+      $("#quoteBox").hidden = v !== "artist";
+      if (v !== "artist") setQuote("none");
     };
+    $("#segQuote").addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (b) setQuote(b.dataset.v);
+    });
+    setQuote("none");
+    setRole(role);
     const setType = (v) => {
       type = v;
       $$("#tabsType .tab").forEach((b) => b.classList.toggle("on", b.dataset.v === v));
@@ -642,6 +679,21 @@
       if (type === "text") {
         const text = $("#fText").value.trim();
         if (!text) return toast("还没有内容");
+        const myName = ($("#fMyName") ? $("#fMyName").value.trim() : "") || "";
+        const qText = ($("#fQText") ? $("#fQText").value.trim() : "");
+        const quote =
+          role === "artist" && quoteType !== "none" && qText
+            ? {
+                type: quoteType,
+                name: quoteType === "me" ? myName || "我" : "",
+                text: qText,
+                textZh: $("#fQZh") ? $("#fQZh").value.trim() : "",
+              }
+            : null;
+        if (quote && quoteType === "me" && myName) {
+          S.settings.myName = myName;
+          await saveSettings();
+        }
         const m = {
           id: uid(),
           artistId,
@@ -649,6 +701,7 @@
           type: "text",
           text,
           textZh: $("#fTextZh").value.trim(),
+          quote,
           sentAt,
           createdAt: new Date().toISOString(),
           starred: false,
@@ -665,6 +718,9 @@
         // 保持面板打开，方便连续粘贴下一条
         $("#fText").value = "";
         $("#fTextZh").value = "";
+        if ($("#fQText")) $("#fQText").value = "";
+        if ($("#fQZh")) $("#fQZh").value = "";
+        setQuote("none");
         $("#fText").focus();
         $("#cText").textContent = "0 字";
         ["#fText", "#fTextZh"].forEach((id) => { $(id).style.height = ""; });
@@ -686,8 +742,8 @@
           artistId,
           role,
           type,
-          text: $("#fCap") ? $("#fCap").value.trim() : "",
-          textZh: $("#fCapZh") ? $("#fCapZh").value.trim() : "",
+          text: "",
+          textZh: "",
           sentAt: t,
           createdAt: new Date().toISOString(),
           starred: false,
@@ -1040,6 +1096,24 @@
         <div class="field"><label>中文对照</label>
           <textarea class="msg-input" id="eZh" placeholder="中文意思，可留空">${esc(msg.textZh || "")}</textarea>
         </div>
+        ${
+          msg.quote
+            ? `<div class="field"><label>引用区标题</label>
+                 <div class="seg" id="eQType">
+                   <button data-v="fan" ${msg.quote.type !== "me" ? "class=\"on\"" : ""}>ARTIST的回复</button>
+                   <button data-v="me" ${msg.quote.type === "me" ? "class=\"on\"" : ""}>回复给…</button>
+                 </div></div>
+               <div class="field"><label>「回复给」的名字</label>
+                 <input id="eQName" value="${esc(msg.quote.name || S.settings.myName || "我")}">
+               </div>
+               <div class="field"><label>被引用的原文</label>
+                 <textarea class="msg-input" id="eQText" style="min-height:60px">${esc(msg.quote.text || "")}</textarea>
+               </div>
+               <div class="field"><label>被引用中文对照</label>
+                 <textarea class="msg-input" id="eQZh" style="min-height:60px">${esc(msg.quote.textZh || "")}</textarea>
+               </div>`
+            : ""
+        }
         <div class="field"><label>发送时间</label><input type="datetime-local" id="eTime" value="${val}"></div>
         <div class="sheet-foot">
           <button class="btn save" id="eSave">保存修改</button>
@@ -1049,9 +1123,25 @@
       autoGrow($("#eText"), window.innerHeight * 0.22);
       autoGrow($("#eZh"), window.innerHeight * 0.22);
       $("#eCancel").onclick = closeSheet;
+      let eQType = msg.quote ? (msg.quote.type === "me" ? "me" : "fan") : "";
+      const eQSeg = $("#eQType");
+      if (eQSeg)
+        eQSeg.addEventListener("click", (e) => {
+          const b = e.target.closest("button");
+          if (!b) return;
+          eQType = b.dataset.v;
+          [...eQSeg.children].forEach((x) => x.classList.toggle("on", x.dataset.v === eQType));
+        });
       $("#eSave").onclick = async () => {
         msg.text = $("#eText").value.trim();
         msg.textZh = $("#eZh").value.trim();
+        if (msg.quote) {
+          msg.quote.type = eQType || "fan";
+          msg.quote.name = ($("#eQName") ? $("#eQName").value.trim() : "") || "我";
+          msg.quote.text = ($("#eQText") ? $("#eQText").value.trim() : "");
+          msg.quote.textZh = ($("#eQZh") ? $("#eQZh").value.trim() : "");
+          if (!msg.quote.text) msg.quote = null;
+        }
         const t = $("#eTime").value;
         if (t) msg.sentAt = new Date(t).toISOString();
         await DB.put("messages", msg);
@@ -1737,6 +1827,15 @@
       ["d1", "artist", "text", "오늘 하늘 ☁️ 너희한테 보여주려고", daysAgo(1, 20, 4), "今天的天空 ☁️ 拍给你们看"],
       ["d1", "artist", "voice", "", daysAgo(1, 20, 9)],
       ["d1", "artist", "text", "잘 자, 좋은 꿈 꿔 🌙", daysAgo(0, 0, 40), "晚安，做个好梦 🌙"],
+      [
+        "d1",
+        "artist",
+        "text",
+        "응 .. 불미스럽더라 12년 아이돌인생중 이런 게임은 또 처음 허허~",
+        daysAgo(0, 1, 28),
+        "嗯…不好意思，12 年爱豆人生中第一次玩这种游戏 呵呵呵~",
+        { type: "me", name: "umji", text: "포즈맞추기에서 불미스러운일이 있던뎅ㅋㅋㅋ", textZh: "在摆姿势的时候发生了不愉快的事情。" },
+      ],
       ["d2", "artist", "text", "비행기에서 막 일본 도착했어 🇯🇵", daysAgo(1, 9, 15), "在飞机上，刚落地日本 🇯🇵"],
       ["d2", "artist", "image", "", daysAgo(1, 9, 16)],
       ["d2", "artist", "text", "오늘 너무 추운데, 너희 쪽은 어때?", daysAgo(1, 9, 17), "今天好冷，你们那边呢？"],
@@ -1753,6 +1852,7 @@
         type: m[2],
         text: m[3],
         textZh: m[5] || "",
+        quote: m[6] || null,
         sentAt: m[4],
         createdAt: m[4],
         starred: i === 4,
