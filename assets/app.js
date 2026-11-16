@@ -367,10 +367,12 @@
       ${avHTML}
       <div class="row-body" data-msg="${esc(m.id)}">
         ${nameHTML}
-        <div class="bubble ${cls} ${isMedia ? "media" : ""}${quoteHTML ? " has-quote" : ""}">${
+        <div class="bubble-line">
+          <div class="bubble ${cls} ${isMedia ? "media" : ""}${quoteHTML ? " has-quote" : ""}">${
           isMedia ? mediaHTML(m) : ""
         }${quoteHTML}${textHTML}</div>
-        <div class="row-meta"><span>${fmtClock(m.sentAt)}</span>${star}${sync}</div>
+          <div class="row-meta"><span>${fmtClock(m.sentAt)}</span>${star}${sync}</div>
+        </div>
       </div>
     </div>`;
   }
