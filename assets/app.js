@@ -2,7 +2,7 @@
    纯前端单机应用：文字和缩略图存本地 IndexedDB，原图/原视频上传 Google Drive
 */
 (function () {
-  const APP_VERSION = "v1.4.5";
+  const APP_VERSION = "v1.4.6";
   "use strict";
 
   /* ---------------- 小工具 ---------------- */
@@ -146,7 +146,8 @@
   }
 
   function blobUrl(key, blob) {
-    if (!blob) return "";
+    // 备份 JSON 里的 Blob 会被序列化成 {}，导入后不能直接 createObjectURL
+    if (!(blob instanceof Blob)) return "";
     if (urls.has(key)) return urls.get(key);
     const u = URL.createObjectURL(blob);
     urls.set(key, u);
@@ -237,13 +238,14 @@
       ? `${S.artists.length} 位 · ${total} 条存档${S.pending ? ` · ${S.pending} 待同步` : ""}`
       : "把喜欢的内容，留在这里";
 
-    list.innerHTML =
-      artists
+    let html = "";
+    try {
+      html = artists
         .map((a) => {
           const m = S.meta[a.id] || { count: 0, lastText: "", lastAt: null };
           return `<article class="chat-item" data-id="${esc(a.id)}">
         <div class="avatar s52 ring" style="background:linear-gradient(150deg,${colorOf(a.name)})">
-          ${a.avatarThumb ? `<img src="${blobUrl("av" + a.id, a.avatarThumb)}" alt="">` : esc((a.name || "?").slice(0, 1))}
+          ${asBlob(a.avatarThumb) ? `<img src="${blobUrl("av" + a.id, a.avatarThumb)}" alt="">` : esc(((a.name || "?") + "").slice(0, 1))}
         </div>
         <div class="ci-body">
           <div class="ci-top"><span class="ci-name">${esc(a.name)}</span>${
@@ -255,8 +257,13 @@
         </div>
       </article>`;
         })
-        .join("") +
-      `<button class="add-artist" id="btnAddArtist">${ICON.plus}<span>新建一位艺人</span></button>`;
+        .join("");
+    } catch (err) {
+      html = "";
+      toast("列表显示异常：" + err.message + "（存档数据未丢失）", 3200);
+    }
+    list.innerHTML =
+      html + `<button class="add-artist" id="btnAddArtist">${ICON.plus}<span>新建一位艺人</span></button>`;
 
     $("#homeEmpty").hidden = artists.length > 0;
   }
@@ -359,7 +366,7 @@
     const avHTML =
       side === "left"
         ? `<div class="row-av"><span class="av-in" style="background:linear-gradient(150deg,${colorOf(a.name || "")})">${
-            a.avatarThumb
+            asBlob(a.avatarThumb)
               ? `<img src="${blobUrl("av" + a.id, a.avatarThumb)}" alt="">`
               : esc((a.name || "?").slice(0, 1))
           }</span></div>`
@@ -455,7 +462,7 @@
       <button class="btn save" id="saveArtist">${isNew ? "创建" : "保存"}</button>
       ${isNew ? "" : `<button class="btn danger" id="delArtist" style="margin-top:10px">删除这位艺人和全部存档</button>`}
     `);
-    let avBlob = a.avatarThumb || null;
+    let avBlob = asBlob(a.avatarThumb);
     const showPrev = () => {
       $("#avPrev").innerHTML = avBlob ? `<div class="pv"><img src="${blobUrl("tmpav", avBlob)}"></div>` : "";
     };
@@ -1052,7 +1059,14 @@
   /* 导入一份 JSON 载荷；mode: merge（只补新的）/ replace（覆盖本机） */
   async function importPayload(data, mode) {
     if (!data || !data.messages) throw new Error("格式不对");
-    const incoming = data.artists || (data.artist ? [data.artist] : []);
+    const incoming = (data.artists || (data.artist ? [data.artist] : [])).map((a) => {
+      if (!a || !a.id) return a;
+      const out = { ...a };
+      if (!(out.avatarThumb instanceof Blob)) out.avatarThumb = null;
+      out.name = (out.name == null ? "" : String(out.name)) || "未命名";
+      out.group = out.group == null ? "" : String(out.group);
+      return out;
+    });
     const cleanMsgs = (data.messages || []).map((m) => {
       if (!m.media) return m;
       const media = { ...m.media };
