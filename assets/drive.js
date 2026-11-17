@@ -202,6 +202,20 @@
     return (await res.json()).id;
   }
 
+  /* 列出某个文件夹里的文件 */
+  async function list(folderId, opts = {}) {
+    const tok = await ensureToken(false);
+    let q = `'${folderId}' in parents and trashed=false`;
+    if (opts.nameContains) q += ` and name contains '${escQ(opts.nameContains)}'`;
+    const url =
+      `${API}/files?q=${encodeURIComponent(q)}` +
+      `&orderBy=${encodeURIComponent(opts.orderBy || "modifiedTime desc")}` +
+      `&pageSize=${opts.pageSize || 50}&fields=files(id,name,size,modifiedTime)`;
+    const res = await fetch(url, { headers: { Authorization: "Bearer " + tok } });
+    if (!res.ok) throw new Error("读取备份列表失败：" + (await res.text()).slice(0, 120));
+    return (await res.json()).files || [];
+  }
+
   /* 删除云端的文件（只能删本 App 创建的；会进 Drive 回收站） */
   async function remove(fileId) {
     const tok = await ensureToken(true);
@@ -253,6 +267,7 @@
     },
     upload,
     remove,
+    list,
     fetchBlob,
     async about() {
       const res = await api("/about?fields=user(emailAddress,displayName),storageQuota(usage,limit)");

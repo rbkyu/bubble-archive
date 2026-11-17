@@ -2,7 +2,7 @@
    纯前端单机应用：文字和缩略图存本地 IndexedDB，原图/原视频上传 Google Drive
 */
 (function () {
-  const APP_VERSION = "v1.4.4";
+  const APP_VERSION = "v1.4.5";
   "use strict";
 
   /* ---------------- 小工具 ---------------- */
@@ -1049,6 +1049,124 @@
     }
   }
 
+  /* 导入一份 JSON 载荷；mode: merge（只补新的）/ replace（覆盖本机） */
+  async function importPayload(data, mode) {
+    if (!data || !data.messages) throw new Error("格式不对");
+    const incoming = data.artists || (data.artist ? [data.artist] : []);
+    const cleanMsgs = (data.messages || []).map((m) => {
+      if (!m.media) return m;
+      const media = { ...m.media };
+      if (!(media.thumb instanceof Blob)) media.thumb = null;
+      if (!(media.full instanceof Blob)) media.full = null;
+      return { ...m, media };
+    });
+    let addedA = incoming.length;
+    let addedM = cleanMsgs.length;
+    if (mode === "replace") {
+      await DB.clear("messages");
+      await DB.clear("artists");
+      await DB.putMany("artists", incoming.filter((a) => a && a.id));
+      await DB.putMany("messages", cleanMsgs.filter((m) => m && m.id));
+    } else {
+      const artists = await DB.all("artists");
+      const ids = new Set(artists.map((a) => a.id));
+      const newArtists = incoming.filter((a) => a && a.id && !ids.has(a.id));
+      const messages = await DB.all("messages");
+      const mids = new Set(messages.map((m) => m.id));
+      const newMsgs = cleanMsgs.filter((m) => m && m.id && !mids.has(m.id));
+      await DB.putMany("artists", newArtists);
+      await DB.putMany("messages", newMsgs);
+      addedA = newArtists.length;
+      addedM = newMsgs.length;
+    }
+    await reloadAll();
+    S.artist = null;
+    renderHome();
+    if (S.view === "chat") goHome();
+    toast(mode === "replace" ? `已恢复：${addedA} 位艺人、${addedM} 条存档` : `导入 ${addedA} 位艺人、${addedM} 条存档`);
+    renderSettings();
+    return { addedA, addedM };
+  }
+
+  /* 从 Drive 的「泡泡存档/备份」里挑一份恢复 */
+  async function restoreFromDrive() {
+    if (!Drive.getClientId()) return toast("先在上面填 OAuth 客户端 ID 并连接");
+    toast("正在读取云端备份…", 1200);
+    let files = [];
+    try {
+      await Drive.connect();
+      const root = S.settings.rootFolderId || (await Drive.ensureFolder("泡泡存档", null));
+      S.settings.rootFolderId = root;
+      const dir = S.settings.backupFolderId || (await Drive.ensureFolder("备份", root));
+      S.settings.backupFolderId = dir;
+      await saveSettings();
+      files = await Drive.list(dir, { nameContains: "存档备份" });
+    } catch (e) {
+      return toast("读取失败：" + (e.message || e), 3200);
+    }
+    if (!files.length) return toast("云端备份文件夹里还没有备份，先点「现在备份到 Drive」", 3000);
+
+    const fmtT = (iso) => {
+      const d = new Date(iso);
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+    const sheet = openSheet(`
+      <h2 style="margin-bottom:4px">从云端恢复</h2>
+      <p class="hint" style="margin-bottom:8px">按时间倒序，最新的在最上面。</p>
+      <div class="menu">
+        ${files
+          .map(
+            (f) =>
+              `<button data-id="${esc(f.id)}" data-name="${esc(f.name)}">${ICON.cloudOk}
+                <div style="display:flex;flex-direction:column;gap:2px;align-items:flex-start;min-width:0">
+                  <span style="font-size:14px;font-weight:600;letter-spacing:.2px">${f.name
+                    .replace("存档备份-", "")
+                    .replace(".json", "")}</span>
+                  <span class="hint" style="font-size:11.5px">${fmtT(f.modifiedTime)}${
+                f.size ? " · " + fmtSize(+f.size) : ""
+              }</span>
+                </div></button>`
+          )
+          .join("")}
+      </div>
+    `);
+    sheet.addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-id]");
+      if (!b) return;
+      const id = b.dataset.id;
+      const name = b.dataset.name;
+      closeSheet();
+      setTimeout(() => askRestoreMode(id, name), 240);
+    });
+  }
+
+  function askRestoreMode(fileId, name) {
+    const sheet = openSheet(`
+      <h2 style="margin-bottom:6px">用这份备份恢复吗？</h2>
+      <p class="hint">${esc(name)}</p>
+      <div class="menu" style="margin-top:10px">
+        <button data-mode="replace">${ICON.cloudOk}<span>覆盖本机：用这份备份替换当前全部存档</span></button>
+        <button data-mode="merge">${ICON.copy}<span>只合并：本机已有的不动，补进备份里新的</span></button>
+      </div>
+      <p class="hint" style="margin-top:8px">换设备 / 电脑改完再传回手机 → 选「覆盖」。两边都有新内容 → 选「只合并」（不会删本机数据）。</p>
+    `);
+    sheet.addEventListener("click", async (e) => {
+      const b = e.target.closest("[data-mode]");
+      if (!b) return;
+      const mode = b.dataset.mode;
+      if (mode === "replace" && !confirm("确定用这份备份覆盖本机全部存档？\n（只会改这台设备上的记录，Drive 里的原图不动）")) return;
+      closeSheet();
+      toast("正在下载备份…", 1600);
+      try {
+        const blob = await Drive.fetchBlob(fileId);
+        const text = await blob.text();
+        await importPayload(JSON.parse(text), mode);
+      } catch (err) {
+        toast("恢复失败：" + (err.message || err), 3200);
+      }
+    });
+  }
+
   async function syncAll(interactive) {
     if (!Drive.getClientId()) {
       toast("先在设置里填 OAuth 客户端 ID");
@@ -1446,6 +1564,9 @@
           <button class="btn" id="btnBackupCloud">现在备份到 Drive</button>
         </div>
         <div class="btn-row">
+          <button class="btn secondary" id="btnRestoreCloud">从 Drive 恢复</button>
+        </div>
+        <div class="btn-row">
           <button class="btn secondary" id="btnExport">导出到手机</button>
           <button class="btn secondary" id="btnImport">从 JSON 导入</button>
         </div>
@@ -1495,6 +1616,8 @@
     $("#btnSyncNow").onclick = () => syncAll(true);
 
     $("#btnBackupCloud").onclick = backupToDrive;
+
+    $("#btnRestoreCloud").onclick = restoreFromDrive;
 
     $("#btnForceUpdate").onclick = async () => {
       toast("正在清理旧缓存…", 1500);
@@ -1568,30 +1691,7 @@
       const f = e.target.files[0];
       if (!f) return;
       try {
-        const data = JSON.parse(await f.text());
-        if (!data.messages) throw new Error("格式不对");
-        const artists = await DB.all("artists");
-        const ids = new Set(artists.map((a) => a.id));
-        // 兼容两种备份：整库导出（artists 数组）和单个对话导出（artist 单数）
-        const incoming = data.artists || (data.artist ? [data.artist] : []);
-        const newArtists = incoming.filter((a) => a && a.id && !ids.has(a.id));
-        const messages = await DB.all("messages");
-        const mids = new Set(messages.map((m) => m.id));
-        const newMsgs = (data.messages || [])
-          .filter((m) => !mids.has(m.id))
-          .map((m) => {
-            if (!m.media) return m;
-            const media = { ...m.media };
-            if (!(media.thumb instanceof Blob)) media.thumb = null;
-            if (!(media.full instanceof Blob)) media.full = null;
-            return { ...m, media };
-          });
-        await DB.putMany("artists", newArtists);
-        await DB.putMany("messages", newMsgs);
-        await reloadAll();
-        renderHome();
-        toast(`导入 ${newArtists.length} 位艺人、${newMsgs.length} 条存档`);
-        renderSettings();
+        await importPayload(JSON.parse(await f.text()), "merge");
       } catch (err) {
         toast("导入失败：" + err.message);
       }
