@@ -2,6 +2,7 @@
    纯前端单机应用：文字和缩略图存本地 IndexedDB，原图/原视频上传 Google Drive
 */
 (function () {
+  const APP_VERSION = "v1.4.4";
   "use strict";
 
   /* ---------------- 小工具 ---------------- */
@@ -174,7 +175,13 @@
       openChat(S.artists[0].id);
     }
     if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
-      navigator.serviceWorker.register("sw.js").catch(() => {});
+      navigator.serviceWorker
+        .register("sw.js", { updateViaCache: "none" })
+        .then((reg) => {
+          reg.update().catch(() => {});
+          setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
+        })
+        .catch(() => {});
     }
   }
 
@@ -1457,7 +1464,9 @@
 
       <div class="card">
         <h3>关于</h3>
-        <p class="hint">泡泡存档 v1.3.2 · 纯单机，不连原 App<br>只读存档：内容只属于你，不会发送给任何人。</p>
+        <p class="hint">泡泡存档 ${APP_VERSION} · 纯单机，不连原 App<br>只读存档：内容只属于你，不会发送给任何人。</p>
+        <div class="btn-row"><button class="btn ghost" id="btnForceUpdate">检查更新（清缓存重载）</button></div>
+        <p class="hint" id="verHint">正在运行的版本：${APP_VERSION}</p>
       </div>
     `;
 
@@ -1486,6 +1495,24 @@
     $("#btnSyncNow").onclick = () => syncAll(true);
 
     $("#btnBackupCloud").onclick = backupToDrive;
+
+    $("#btnForceUpdate").onclick = async () => {
+      toast("正在清理旧缓存…", 1500);
+      try {
+        if ("serviceWorker" in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.map((r) => r.unregister()));
+        }
+        if (window.caches) {
+          const keys = await caches.keys();
+          await Promise.all(keys.map((k) => caches.delete(k)));
+        }
+      } catch (e) {}
+      toast("已清理，正在重新加载（存档数据不受影响）", 2200);
+      setTimeout(() => {
+        location.reload();
+      }, 900);
+    };
     const openBackup = $("#btnOpenBackup");
     if (openBackup)
       openBackup.onclick = () => {
