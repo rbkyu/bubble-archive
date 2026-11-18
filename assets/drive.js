@@ -92,7 +92,7 @@
       }
       pendingResolve = (err, tok) => (err ? reject(err) : resolve(tok));
       try {
-        tokenClient.requestAccessToken({ prompt: interactive ? "consent" : "" });
+        tokenClient.requestAccessToken({ prompt: "" });
       } catch (e) {
         pendingResolve = null;
         reject(e);
