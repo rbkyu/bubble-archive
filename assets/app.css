@@ -305,8 +305,17 @@ main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   background: #fff; color: var(--ink); display: grid; place-items: center; flex: 0 0 38px;
 }
 .cal-nav svg { width: 17px; height: 17px; }
-.cal-title { font-size: 15.5px; font-weight: 700; letter-spacing: 0.3px; }
-.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; margin-top: 6px; }
+.cal-title {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 15.5px; font-weight: 700;
+  letter-spacing: 0.3px; cursor: pointer; padding: 6px 10px; border-radius: 12px; -webkit-tap-highlight-color: transparent;
+}
+.cal-title:active { background: #f4f3fb; }
+.cal-caret { font-size: 10px; color: var(--ink-3); font-weight: 400; margin-top: 2px; }
+/* 固定 6 行高度：31 天月末的月份有 6 行、其他 5 行，避免弹层高度跳变 */
+.cal-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center;
+  margin-top: 6px; align-content: start; min-height: 289px;
+}
 .cal-w { font-size: 11px; color: var(--ink-3); padding: 4px 0 6px; }
 .cal-d {
   position: relative; height: 42px; border: 0; background: transparent; border-radius: 12px;
@@ -323,6 +332,33 @@ main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .cal-d:active { background: #f2f1fb; }
 .cal-foot { padding: 10px 2px 2px; }
 .cal-d.has.today::after { background: var(--primary); }
+
+/* 年月选择浮层（覆盖在日历弹层内部） */
+.cal-picker {
+  position: absolute; inset: 0; z-index: 3;
+  background: #fff; border-radius: 22px 22px 0 0;
+  padding: 8px 16px calc(16px + var(--safe-b));
+  display: flex; flex-direction: column; gap: 10px;
+  box-shadow: 0 -8px 30px rgba(20, 18, 40, 0.18);
+}
+.cal-picker[hidden] { display: none; }
+.cal-picker-head { display: flex; align-items: center; justify-content: space-between; padding-top: 6px; }
+.cal-picker-title { font-size: 15.5px; font-weight: 680; letter-spacing: 0.3px; }
+.cal-year { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 6px; }
+.cal-year-label { font-size: 21px; font-weight: 750; letter-spacing: 0.6px; }
+.cal-months { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 8px; }
+.cal-m {
+  position: relative; height: 46px; border: 1px solid var(--line); border-radius: 13px;
+  background: #fff; color: var(--ink); font-family: inherit; font-size: 14.5px; font-weight: 550;
+}
+.cal-m.has { border-color: rgba(124, 99, 245, 0.45); color: var(--primary); font-weight: 700; }
+.cal-m.has::after {
+  content: ""; position: absolute; left: 50%; bottom: 7px; width: 4px; height: 4px;
+  margin-left: -2px; border-radius: 50%; background: var(--primary);
+}
+.cal-m.cur { background: var(--primary); border-color: var(--primary); color: #fff; }
+.cal-m.cur::after { background: rgba(255, 255, 255, 0.9); }
+.cal-m:active { transform: scale(0.97); }
 
 /* 跳转后高亮 */
 .row.flash .bubble { animation: flashIn 1.6s ease; }

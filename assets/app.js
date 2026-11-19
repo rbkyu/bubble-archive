@@ -2,7 +2,7 @@
    纯前端单机应用：文字和缩略图存本地 IndexedDB，原图/原视频上传 Google Drive
 */
 (function () {
-  const APP_VERSION = "v1.4.6";
+  const APP_VERSION = "v1.5.0";
   "use strict";
 
   /* ---------------- 小工具 ---------------- */
@@ -126,6 +126,35 @@
     }
   }
   const asBlob = (b) => (b instanceof Blob ? b : null);
+  /* 头像跟着 JSON 走：Blob 不能写进 JSON，转成 dataURL 存字段 avatarB64，导入时再还原 */
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result || ""));
+      fr.onerror = () => reject(fr.error || new Error("读取头像失败"));
+      fr.readAsDataURL(blob);
+    });
+  }
+  async function dataUrlToBlob(url) {
+    if (typeof url !== "string" || !/^data:/i.test(url)) return null;
+    try {
+      const r = await fetch(url);
+      const b = await r.blob();
+      return b instanceof Blob ? b : null;
+    } catch (e) {
+      return null;
+    }
+  }
+  /* 导出/备份前把艺人头像换成 avatarB64 */
+  async function artistsForJson(artists) {
+    return Promise.all(
+      artists.map(async (a) => ({
+        ...a,
+        avatarThumb: null,
+        avatarB64: asBlob(a.avatarThumb) ? await blobToDataUrl(a.avatarThumb) : a.avatarB64 || null,
+      }))
+    );
+  }
   function stripMedia(m) {
     return {
       ...m,
@@ -1031,7 +1060,7 @@
         app: "bubble-archive",
         version: 1,
         exportedAt: new Date().toISOString(),
-        artists,
+        artists: await artistsForJson(artists),
         messages: messages.map(stripMedia),
       };
       const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
@@ -1056,17 +1085,25 @@
     }
   }
 
-  /* 导入一份 JSON 载荷；mode: merge（只补新的）/ replace（覆盖本机） */
+  /* 导入一份 JSON 载荷；mode: merge（同 id 以 JSON 为准更新）/ replace（覆盖本机） */
   async function importPayload(data, mode) {
     if (!data || !data.messages) throw new Error("格式不对");
-    const incoming = (data.artists || (data.artist ? [data.artist] : [])).map((a) => {
-      if (!a || !a.id) return a;
-      const out = { ...a };
-      if (!(out.avatarThumb instanceof Blob)) out.avatarThumb = null;
-      out.name = (out.name == null ? "" : String(out.name)) || "未命名";
-      out.group = out.group == null ? "" : String(out.group);
-      return out;
-    });
+    const rawArtists = data.artists || (data.artist ? [data.artist] : []);
+    const incoming = await Promise.all(
+      rawArtists.map(async (a) => {
+        if (!a || !a.id) return a;
+        const out = { ...a };
+        if (!(out.avatarThumb instanceof Blob)) out.avatarThumb = null;
+        if (out.avatarB64) {
+          const b = await dataUrlToBlob(out.avatarB64);
+          if (b) out.avatarThumb = b;
+        }
+        delete out.avatarB64;
+        out.name = (out.name == null ? "" : String(out.name)) || "未命名";
+        out.group = out.group == null ? "" : String(out.group);
+        return out;
+      })
+    );
     const cleanMsgs = (data.messages || []).map((m) => {
       if (!m.media) return m;
       const media = { ...m.media };
@@ -1074,32 +1111,83 @@
       if (!(media.full instanceof Blob)) media.full = null;
       return { ...m, media };
     });
-    let addedA = incoming.length;
-    let addedM = cleanMsgs.length;
+    let addedA = 0;
+    let updatedA = 0;
+    let addedM = 0;
+    let updatedM = 0;
     if (mode === "replace") {
       await DB.clear("messages");
       await DB.clear("artists");
-      await DB.putMany("artists", incoming.filter((a) => a && a.id));
-      await DB.putMany("messages", cleanMsgs.filter((m) => m && m.id));
+      const aOk = incoming.filter((a) => a && a.id);
+      const mOk = cleanMsgs.filter((m) => m && m.id);
+      await DB.putMany("artists", aOk);
+      await DB.putMany("messages", mOk);
+      addedA = aOk.length;
+      addedM = mOk.length;
     } else {
+      /* 同 id 就用 JSON 的内容覆盖本机；但 JSON 里带不走的本地图片缩略图/原件要保住 */
       const artists = await DB.all("artists");
-      const ids = new Set(artists.map((a) => a.id));
-      const newArtists = incoming.filter((a) => a && a.id && !ids.has(a.id));
+      const aMap = new Map(artists.map((a) => [a.id, a]));
+      const aOut = [];
+      for (const a of incoming) {
+        if (!a || !a.id) continue;
+        const prev = aMap.get(a.id);
+        if (!prev) {
+          aOut.push(a);
+          addedA++;
+          continue;
+        }
+        aOut.push({
+          ...prev,
+          ...a,
+          avatarThumb: asBlob(a.avatarThumb) || asBlob(prev.avatarThumb),
+          driveFolderId: a.driveFolderId || prev.driveFolderId || "",
+        });
+        updatedA++;
+      }
+      await DB.putMany("artists", aOut);
+
       const messages = await DB.all("messages");
-      const mids = new Set(messages.map((m) => m.id));
-      const newMsgs = cleanMsgs.filter((m) => m && m.id && !mids.has(m.id));
-      await DB.putMany("artists", newArtists);
-      await DB.putMany("messages", newMsgs);
-      addedA = newArtists.length;
-      addedM = newMsgs.length;
+      const mMap = new Map(messages.map((m) => [m.id, m]));
+      const mOut = [];
+      for (const m of cleanMsgs) {
+        if (!m || !m.id) continue;
+        const prev = mMap.get(m.id);
+        if (!prev) {
+          mOut.push(m);
+          addedM++;
+          continue;
+        }
+        const pm = prev.media || null;
+        const nm = m.media || null;
+        let media = nm;
+        if (pm && nm) {
+          media = {
+            ...pm,
+            ...nm,
+            thumb: asBlob(nm.thumb) || asBlob(pm.thumb),
+            full: asBlob(nm.full) || asBlob(pm.full),
+          };
+        } else if (!nm && pm) {
+          media = pm;
+        }
+        mOut.push({ ...prev, ...m, media, driveId: m.driveId || prev.driveId || "" });
+        updatedM++;
+      }
+      await DB.putMany("messages", mOut);
     }
     await reloadAll();
     S.artist = null;
     renderHome();
     if (S.view === "chat") goHome();
-    toast(mode === "replace" ? `已恢复：${addedA} 位艺人、${addedM} 条存档` : `导入 ${addedA} 位艺人、${addedM} 条存档`);
+    const artNote = addedA || updatedA ? `（艺人 新增 ${addedA} / 更新 ${updatedA}）` : "";
+    toast(
+      mode === "replace"
+        ? `已恢复：${addedA} 位艺人、${addedM} 条存档`
+        : `导入完成：新增 ${addedM} 条、更新 ${updatedM} 条${artNote}`
+    );
     renderSettings();
-    return { addedA, addedM };
+    return { addedA, updatedA, addedM, updatedM };
   }
 
   /* 从 Drive 的「泡泡存档/备份」里挑一份恢复 */
@@ -1693,7 +1781,7 @@
         app: "bubble-archive",
         version: 1,
         exportedAt: new Date().toISOString(),
-        artists: artists.map((a) => ({ ...a, avatarThumb: null })),
+        artists: await artistsForJson(artists),
         messages: messages.map(stripMedia),
       };
       downloadJSON(payload, `泡泡存档-${new Date().toISOString().slice(0, 10)}.json`);
@@ -1774,10 +1862,10 @@
 
     const sheet = openSheet(`
       <h2 style="margin-bottom:2px">按日期查找</h2>
-      <p class="hint" style="margin-bottom:6px">有圆点的日期有存档，点一下直接跳过去。</p>
+      <p class="hint" style="margin-bottom:6px">有圆点的日期有存档，点一下直接跳过去。点上面的年月可以快速选。</p>
       <div class="cal-head">
         <button class="cal-nav" id="calPrev" aria-label="上个月"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m14.5 5-6.5 7 6.5 7"/></svg></button>
-        <div class="cal-title" id="calTitle"></div>
+        <div class="cal-title" id="calTitle" role="button" tabindex="0" aria-label="选择年月"><span id="calTitleText"></span><span class="cal-caret">▾</span></div>
         <button class="cal-nav" id="calNext" aria-label="下个月"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m9.5 5 6.5 7-6.5 7"/></svg></button>
       </div>
       <div class="cal-grid" id="calGrid"></div>
@@ -1789,12 +1877,25 @@
         </div>
         <p class="hint" id="calRange" style="margin-top:6px;text-align:center"></p>
       </div>
+      <div class="cal-picker" id="calPicker" hidden>
+        <div class="cal-picker-head">
+          <span class="cal-picker-title">跳到某年某月</span>
+          <button class="icon-btn" id="pcClose" aria-label="关闭">${ICON.x}</button>
+        </div>
+        <div class="cal-year">
+          <button class="cal-nav" id="pcPrevYear" aria-label="上一年"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m14.5 5-6.5 7 6.5 7"/></svg></button>
+          <div class="cal-year-label" id="pcYear"></div>
+          <button class="cal-nav" id="pcNextYear" aria-label="下一年"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="m9.5 5 6.5 7-6.5 7"/></svg></button>
+        </div>
+        <div class="cal-months" id="pcMonths"></div>
+        <p class="hint" style="text-align:center;margin-top:2px">有圆点的月份有存档</p>
+      </div>
     `);
 
     const renderCal = () => {
       const y = cur.getFullYear();
       const mo = cur.getMonth();
-      $("#calTitle").textContent = `${y}年${mo + 1}月`;
+      $("#calTitleText").textContent = `${y}年${mo + 1}月`;
       const first = new Date(y, mo, 1);
       const offset = (first.getDay() + 6) % 7; // 周一开头
       const last = new Date(y, mo + 1, 0).getDate();
@@ -1839,6 +1940,47 @@
       cur = dOf(latest);
       renderCal();
     };
+
+    /* 年月选择器：点标题打开，直接选到任意年任意月 */
+    const hasMonths = new Set(Object.keys(counts).map((k) => k.slice(0, 7)));
+    let pcY = cur.getFullYear();
+    const renderPicker = () => {
+      $("#pcYear").textContent = `${pcY}年`;
+      const cy = cur.getFullYear();
+      const cm = cur.getMonth() + 1;
+      let html = "";
+      for (let i = 1; i <= 12; i++) {
+        const key = `${pcY}-${pad(i)}`;
+        const cls = ["cal-m", hasMonths.has(key) ? "has" : "", pcY === cy && i === cm ? "cur" : ""].join(" ");
+        html += `<button class="${cls}" data-m="${i}">${i}月</button>`;
+      }
+      $("#pcMonths").innerHTML = html;
+    };
+    const openPicker = () => {
+      pcY = cur.getFullYear();
+      renderPicker();
+      $("#calPicker").hidden = false;
+    };
+    const closePicker = () => {
+      $("#calPicker").hidden = true;
+    };
+    $("#calTitle").onclick = openPicker;
+    $("#pcClose").onclick = closePicker;
+    $("#pcPrevYear").onclick = () => {
+      pcY -= 1;
+      renderPicker();
+    };
+    $("#pcNextYear").onclick = () => {
+      pcY += 1;
+      renderPicker();
+    };
+    $("#pcMonths").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-m]");
+      if (!b) return;
+      cur = new Date(pcY, Number(b.dataset.m) - 1, 1);
+      renderCal();
+      closePicker();
+    });
 
     $("#calGrid").addEventListener("click", (e) => {
       const b = e.target.closest("[data-d]");
@@ -1896,7 +2038,11 @@
       } else if (act === "export") {
         closeSheet();
         const messages = await DB.byIndex("messages", "artistId", a.id);
-        downloadJSON({ app: "bubble-archive", artist: a, artistRef: a, messages: messages.map(stripMedia) }, `${a.name}-存档.json`);
+        const [aOut] = await artistsForJson([a]);
+        downloadJSON(
+          { app: "bubble-archive", artist: aOut, artistRef: aOut, messages: messages.map(stripMedia) },
+          `${a.name}-存档.json`
+        );
         toast("已导出");
       } else if (act === "delete") {
         if (!confirm(`删除「${a.name}」的全部存档？（云端文件不会删除）`)) return;
