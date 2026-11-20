@@ -2,7 +2,7 @@
    纯前端单机应用：文字和缩略图存本地 IndexedDB，原图/原视频上传 Google Drive
 */
 (function () {
-  const APP_VERSION = "v1.5.1";
+  const APP_VERSION = "v1.5.2";
   "use strict";
 
   /* ---------------- 小工具 ---------------- */
@@ -2066,7 +2066,7 @@
   }
 
   /* 填充照片位：一次选多张图，按空位的时间顺序依次补进去 */
-  function fillSlots(artistId) {
+  function fillSlots(artistId, dayK = null) {
     const inp = document.createElement("input");
     inp.type = "file";
     inp.accept = "image/*";
@@ -2077,14 +2077,58 @@
       const files = [...(inp.files || [])];
       inp.remove();
       if (!files.length) return;
-      await applySlotFiles(artistId, files);
+      await applySlotFiles(artistId, files, dayK);
     };
+    closeSheet();
     inp.click();
   }
 
-  async function applySlotFiles(artistId, files) {
+  /* 空位跨好几天时，先问要填哪一天 */
+  async function openFillPicker(artistId) {
     const slots = (await DB.byIndex("messages", "artistId", artistId))
       .filter(isEmptySlot)
+      .sort(
+        (x, y) =>
+          (x.sentAt || "").localeCompare(y.sentAt || "") ||
+          String(x.createdAt || "").localeCompare(String(y.createdAt || ""))
+      );
+    if (!slots.length) return toast("这段里已经没有空位了");
+    const groups = new Map();
+    for (const s of slots) {
+      const k = dayKey(s.sentAt);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(s);
+    }
+    const keys = [...groups.keys()].sort();
+    if (keys.length === 1) return fillSlots(artistId, keys[0]);
+    const row = (k, date, meta, go) =>
+      `<button class="fill-day" data-k="${k}">
+        <span class="fd-date">${date}</span>
+        <span class="fd-meta">${meta}</span>
+        <span class="fd-go">${go}</span></button>`;
+    const sheet = openSheet(`
+      <h2>填充照片位</h2>
+      <p class="hint">先选哪一天，照片就从那天最早的空位开始，按顺序补进去。</p>
+      <div class="fill-list">
+        ${row("", "全部", `${slots.length} 个空位 · 按时间顺序`, "填充")}
+        ${keys
+          .map((k) => {
+            const d = d2(k + "T00:00:00");
+            const n = groups.get(k).length;
+            return row(k, `${d.getMonth() + 1}月${d.getDate()}日`, `${WD[d.getDay()]} · ${n} 个空位`, "填这天");
+          })
+          .join("")}
+      </div>`);
+    sheet.addEventListener("click", (e) => {
+      const b = e.target.closest(".fill-day");
+      if (!b) return;
+      fillSlots(artistId, b.dataset.k || null);
+    });
+  }
+
+  async function applySlotFiles(artistId, files, dayK = null) {
+    const slots = (await DB.byIndex("messages", "artistId", artistId))
+      .filter((m) => isEmptySlot(m) && (!dayK || dayKey(m.sentAt) === dayK))
       .sort(
         (x, y) =>
           (x.sentAt || "").localeCompare(y.sentAt || "") ||
@@ -2116,18 +2160,21 @@
     await reloadAll();
     updateSyncBadge();
     const left = slots.length - n;
-    toast(left > 0 ? `已填 ${n} 张，还剩 ${left} 个空位` : `已填 ${n} 张，照片位都填满了`, 2600);
+    if (dayK) toast(left > 0 ? `这天已填 ${n} 张，还剩 ${left} 个空位` : `这天的 ${n} 个空位都填满了`, 2600);
+    else toast(left > 0 ? `已填 ${n} 张，还剩 ${left} 个空位` : `已填 ${n} 张，照片位都填满了`, 2600);
   }
 
   async function openChatMenu() {
     const a = S.artist;
-    const slotCount = (await DB.byIndex("messages", "artistId", a.id)).filter(isEmptySlot).length;
+    const slotMsgs = (await DB.byIndex("messages", "artistId", a.id)).filter(isEmptySlot);
+    const slotCount = slotMsgs.length;
+    const slotDays = new Set(slotMsgs.map((m) => dayKey(m.sentAt))).size;
     const sheet = openSheet(`
       <h2>${esc(a.name)}</h2>
       <div class="menu">
         <button data-act="zh-toggle">${ICON.lang}<span>${S.settings.showZh === false ? "显示中文对照" : "只看原文（隐藏中文）"}</span></button>
         <button data-act="star-filter">${ICON.star}<span>${S.onlyStar ? "显示全部消息" : "只看收藏"}</span></button>
-        ${slotCount ? `<button data-act="fill">${ICON.image}<span>填充照片位（${slotCount} 个空位）</span></button>` : ""}
+        ${slotCount ? `<button data-act="fill">${ICON.image}<span>填充照片位（${slotCount} 个空位${slotDays > 1 ? ` · ${slotDays} 天` : ""}）</span></button>` : ""}
         <button data-act="edit">${ICON.pencil}<span>改名 / 换头像</span></button>
         <button data-act="export">${ICON.download}<span>导出这段存档</span></button>
         <button data-act="delete" class="danger">${ICON.trash}<span>删除整段存档</span></button>
@@ -2148,7 +2195,7 @@
         renderChatHeader();
         renderChat(true);
       } else if (act === "fill") {
-        fillSlots(a.id);
+        await openFillPicker(a.id);
       } else if (act === "edit") {
         closeSheet();
         setTimeout(() => openArtistSheet(S.artist), 240);

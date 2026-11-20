@@ -1,5 +1,5 @@
 /* 离线缓存：让 App 在没有网络时也能打开、浏览已存档内容 */
-const VERSION = "v1.5.1";
+const VERSION = "v1.5.2";
 const SHELL = [
   "./",
   "./index.html",
