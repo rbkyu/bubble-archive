@@ -311,10 +311,10 @@ main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 }
 .cal-title:active { background: #f4f3fb; }
 .cal-caret { font-size: 10px; color: var(--ink-3); font-weight: 400; margin-top: 2px; }
-/* 固定 6 行高度：31 天月末的月份有 6 行、其他 5 行，避免弹层高度跳变 */
+/* 固定 6 行高度：31 天且月初不是周一的月份会占满 6 行、其他只占 5 行，用固定 height 避免 1px 级跳动 */
 .cal-grid {
   display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center;
-  margin-top: 6px; align-content: start; min-height: 289px;
+  margin-top: 6px; align-content: start; height: 290px;
 }
 .cal-w { font-size: 11px; color: var(--ink-3); padding: 4px 0 6px; }
 .cal-d {
@@ -375,6 +375,15 @@ main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   border: 0; padding: 0; line-height: 0;
 }
 .thumb img { width: 100%; display: block; }
+/* 照片位（空着等填图） */
+.thumb.slot {
+  width: 190px; aspect-ratio: 1 / 1.15; border-radius: 13px;
+  border: 1.5px dashed #c9c5e8; background: repeating-linear-gradient(135deg, #f8f7fd 0 9px, #f1f0fa 9px 18px);
+  display: grid; place-items: center;
+}
+.thumb.slot span { display: flex; flex-direction: column; align-items: center; gap: 7px; color: #8f8aa8; line-height: 1.2; }
+.thumb.slot span svg { width: 22px; height: 22px; opacity: 0.75; }
+.thumb.slot i { font-style: normal; font-size: 11.5px; letter-spacing: 0.2px; }
 .thumb .play {
   position: absolute; inset: 0; display: grid; place-items: center;
   background: rgba(20, 18, 40, 0.18);
@@ -540,6 +549,15 @@ textarea.msg-input:focus { border-color: #cfc6ff; background: #fff; }
 }
 .filepick svg { width: 26px; height: 26px; color: #a9aecd; }
 .filepick small { color: var(--ink-3); font-size: 11.5px; }
+
+/* 批量留空：张数 + 生成按钮 */
+.slot-row { display: flex; gap: 8px; align-items: stretch; margin-top: 8px; }
+.slot-row input {
+  width: 88px; border: 1px solid var(--line); border-radius: 11px; padding: 10px 11px;
+  font-size: 13px; background: #fafbff; font-family: inherit; color: var(--ink);
+}
+.slot-row .btn { flex: 1; margin: 0; font-size: 13px; padding: 10px 12px; }
+#slotBox .hint { font-size: 12px; line-height: 1.65; }
 
 .preview-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .preview-list .pv { width: 76px; height: 76px; border-radius: 11px; overflow: hidden; background: #eceef5; position: relative; }

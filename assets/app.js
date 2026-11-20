@@ -2,7 +2,7 @@
    纯前端单机应用：文字和缩略图存本地 IndexedDB，原图/原视频上传 Google Drive
 */
 (function () {
-  const APP_VERSION = "v1.5.0";
+  const APP_VERSION = "v1.5.1";
   "use strict";
 
   /* ---------------- 小工具 ---------------- */
@@ -126,6 +126,13 @@
     }
   }
   const asBlob = (b) => (b instanceof Blob ? b : null);
+  /* 照片位：只留了图片的空位，还没填照片（没有缩略图、没有原文件、没有云端 id） */
+  const isEmptySlot = (m) =>
+    !!m &&
+    m.type === "image" &&
+    !asBlob(m.media && m.media.thumb) &&
+    !asBlob(m.media && m.media.full) &&
+    !m.driveId;
   /* 头像跟着 JSON 走：Blob 不能写进 JSON，转成 dataURL 存字段 avatarB64，导入时再还原 */
   function blobToDataUrl(blob) {
     return new Promise((resolve, reject) => {
@@ -333,6 +340,9 @@
     const med = m.media || {};
     const thumb = asBlob(med.thumb);
     if ((m.type === "image" || m.type === "video") && !thumb) {
+      if (isEmptySlot(m)) {
+        return `<div class="thumb slot"><span>${ICON.image}<i>照片位 · 待填充</i></span></div>`;
+      }
       // 导入备份后没有缩略图：给一个可点击的云端占位
       return `<button class="thumb" data-act="open" style="aspect-ratio:1/1.15;width:190px;display:grid;place-items:center;background:#eceef5">
         <span style="font-size:11.5px;color:#8a8fa3;line-height:1.5;text-align:center">${driveIdOf(m) ? "云端原图<br>点开查看" : "原文件<br>点开查看"}</span></button>`;
@@ -632,6 +642,14 @@
         </button>
         <input type="file" id="fFile" hidden>
         <div class="preview-list" id="filePrev"></div>
+        <div class="field" id="slotBox" hidden>
+          <label>批量留空（先占位，照片稍后一次性补）</label>
+          <div class="slot-row">
+            <input type="number" id="slotN" min="1" max="200" value="10" inputmode="numeric">
+            <button class="btn secondary" id="makeSlots">生成空位</button>
+          </div>
+          <p class="hint" style="margin-top:8px">按上面这个时间起，每张空位 +1 秒排好；之后在对话页 ⋯ →「填充照片位」里一次选图，会按顺序自动补进空位。</p>
+        </div>
       </div>
       <div class="sheet-foot">
         <button class="btn save" id="saveMsg">保存到存档</button>
@@ -683,6 +701,7 @@
         $("#pickHint").textContent = map[v][2];
         $("#fFile").accept = map[v][3];
       }
+      $("#slotBox").hidden = v !== "image";
     };
     $("#segRole").addEventListener("click", (e) => {
       const b = e.target.closest("button");
@@ -709,6 +728,46 @@
           );
         }
       }
+    };
+
+    /* 批量留空：先生成 N 个照片位，随后用 ⋯ →「填充照片位」一次性补图 */
+    $("#makeSlots").onclick = async () => {
+      const artistId = $("#fArtist").value;
+      const timeVal = $("#fTime").value;
+      const sent = timeVal ? new Date(timeVal) : new Date();
+      const n = Math.max(1, Math.min(200, Number($("#slotN").value) || 0));
+      S.settings.lastDate = `${sent.getFullYear()}-${pad(sent.getMonth() + 1)}-${pad(sent.getDate())}T${pad(sent.getHours())}:${pad(
+        sent.getMinutes()
+      )}`;
+      await saveSettings();
+      const rows = [];
+      for (let i = 0; i < n; i++) {
+        rows.push({
+          id: uid(),
+          artistId,
+          role,
+          type: "image",
+          text: "",
+          textZh: "",
+          sentAt: new Date(sent.getTime() + i * 1000).toISOString(),
+          createdAt: new Date().toISOString(),
+          starred: false,
+          syncState: "empty",
+          media: { thumb: null, full: null, name: "", mime: "", size: 0, w: 0, h: 0, duration: 0 },
+        });
+      }
+      await DB.putMany("messages", rows);
+      closeSheet();
+      if (S.view === "chat" && S.artist && S.artist.id === artistId) {
+        await loadChatMsgs();
+        renderChatHeader();
+        renderChat(true);
+        await reloadAll();
+      } else {
+        await reloadAll();
+        renderHome();
+      }
+      toast(`已留出 ${n} 个照片位，去 ⋯ →「填充照片位」补照片`, 2600);
     };
 
     $("#saveMsg").onclick = async () => {
@@ -2006,13 +2065,69 @@
     });
   }
 
-  function openChatMenu() {
+  /* 填充照片位：一次选多张图，按空位的时间顺序依次补进去 */
+  function fillSlots(artistId) {
+    const inp = document.createElement("input");
+    inp.type = "file";
+    inp.accept = "image/*";
+    inp.multiple = true;
+    inp.style.display = "none";
+    document.body.appendChild(inp);
+    inp.onchange = async () => {
+      const files = [...(inp.files || [])];
+      inp.remove();
+      if (!files.length) return;
+      await applySlotFiles(artistId, files);
+    };
+    inp.click();
+  }
+
+  async function applySlotFiles(artistId, files) {
+    const slots = (await DB.byIndex("messages", "artistId", artistId))
+      .filter(isEmptySlot)
+      .sort(
+        (x, y) =>
+          (x.sentAt || "").localeCompare(y.sentAt || "") ||
+          String(x.createdAt || "").localeCompare(String(y.createdAt || ""))
+      );
+    if (!slots.length) return toast("这段里已经没有空位了");
+    closeSheet();
+    toast(`正在填入 ${Math.min(files.length, slots.length)} 张…`, 1600);
+    let n = 0;
+    for (const f of files) {
+      const slot = slots[n];
+      if (!slot) break;
+      try {
+        const prep = await prepareMedia(f, "image");
+        const m = { ...slot, media: prep, syncState: S.settings.clientId ? "pending" : "local" };
+        delete m.driveId;
+        await DB.put("messages", m);
+        if (S.settings.clientId && Drive.ready()) queueUpload(m);
+        n++;
+      } catch (e) {
+        console.warn("[slot]", e);
+      }
+    }
+    if (S.view === "chat" && S.artist && S.artist.id === artistId) {
+      await loadChatMsgs();
+      renderChatHeader();
+      renderChat(true);
+    }
+    await reloadAll();
+    updateSyncBadge();
+    const left = slots.length - n;
+    toast(left > 0 ? `已填 ${n} 张，还剩 ${left} 个空位` : `已填 ${n} 张，照片位都填满了`, 2600);
+  }
+
+  async function openChatMenu() {
     const a = S.artist;
+    const slotCount = (await DB.byIndex("messages", "artistId", a.id)).filter(isEmptySlot).length;
     const sheet = openSheet(`
       <h2>${esc(a.name)}</h2>
       <div class="menu">
         <button data-act="zh-toggle">${ICON.lang}<span>${S.settings.showZh === false ? "显示中文对照" : "只看原文（隐藏中文）"}</span></button>
         <button data-act="star-filter">${ICON.star}<span>${S.onlyStar ? "显示全部消息" : "只看收藏"}</span></button>
+        ${slotCount ? `<button data-act="fill">${ICON.image}<span>填充照片位（${slotCount} 个空位）</span></button>` : ""}
         <button data-act="edit">${ICON.pencil}<span>改名 / 换头像</span></button>
         <button data-act="export">${ICON.download}<span>导出这段存档</span></button>
         <button data-act="delete" class="danger">${ICON.trash}<span>删除整段存档</span></button>
@@ -2032,6 +2147,8 @@
         closeSheet();
         renderChatHeader();
         renderChat(true);
+      } else if (act === "fill") {
+        fillSlots(a.id);
       } else if (act === "edit") {
         closeSheet();
         setTimeout(() => openArtistSheet(S.artist), 240);
