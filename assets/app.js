@@ -2,7 +2,7 @@
    纯前端单机应用：文字和缩略图存本地 IndexedDB，原图/原视频上传 Google Drive
 */
 (function () {
-  const APP_VERSION = "v1.5.2";
+  const APP_VERSION = "v1.5.3";
   "use strict";
 
   /* ---------------- 小工具 ---------------- */
@@ -126,10 +126,13 @@
     }
   }
   const asBlob = (b) => (b instanceof Blob ? b : null);
-  /* 照片位：只留了图片的空位，还没填照片（没有缩略图、没有原文件、没有云端 id） */
+  /* 照片位 / 视频位 / 语音位：只留了空位，还没填文件（没有缩略图、没有原文件、没有云端 id） */
+  const SLOT_KINDS = { image: "照片位", video: "视频位", voice: "语音位" };
+  const SLOT_INPUT = { image: "image/*", video: "video/*", voice: "audio/*" };
+  const slotOrder = (t) => ["image", "video", "voice"].indexOf(t);
   const isEmptySlot = (m) =>
     !!m &&
-    m.type === "image" &&
+    (m.type === "image" || m.type === "video" || m.type === "voice") &&
     !asBlob(m.media && m.media.thumb) &&
     !asBlob(m.media && m.media.full) &&
     !m.driveId;
@@ -336,13 +339,20 @@
       </div>`;
   }
 
+  function slotHTML(m) {
+    const label = `${SLOT_KINDS[m.type]} · 待填充`;
+    if (m.type === "voice") {
+      return `<div class="voice-row slot"><span class="vbtn">${ICON.mic}</span><div class="wave flat"></div><span class="vtime">${label}</span></div>`;
+    }
+    const icon = m.type === "video" ? ICON.play : ICON.image;
+    return `<div class="thumb slot"><span>${icon}<i>${label}</i></span></div>`;
+  }
+
   function mediaHTML(m) {
     const med = m.media || {};
     const thumb = asBlob(med.thumb);
+    if (isEmptySlot(m)) return slotHTML(m);
     if ((m.type === "image" || m.type === "video") && !thumb) {
-      if (isEmptySlot(m)) {
-        return `<div class="thumb slot"><span>${ICON.image}<i>照片位 · 待填充</i></span></div>`;
-      }
       // 导入备份后没有缩略图：给一个可点击的云端占位
       return `<button class="thumb" data-act="open" style="aspect-ratio:1/1.15;width:190px;display:grid;place-items:center;background:#eceef5">
         <span style="font-size:11.5px;color:#8a8fa3;line-height:1.5;text-align:center">${driveIdOf(m) ? "云端原图<br>点开查看" : "原文件<br>点开查看"}</span></button>`;
@@ -643,12 +653,12 @@
         <input type="file" id="fFile" hidden>
         <div class="preview-list" id="filePrev"></div>
         <div class="field" id="slotBox" hidden>
-          <label>批量留空（先占位，照片稍后一次性补）</label>
+          <label id="slotLabel">批量留空（先占位，照片稍后一次性补）</label>
           <div class="slot-row">
             <input type="number" id="slotN" min="1" max="200" value="10" inputmode="numeric">
             <button class="btn secondary" id="makeSlots">生成空位</button>
           </div>
-          <p class="hint" style="margin-top:8px">按上面这个时间起，每张空位 +1 秒排好；之后在对话页 ⋯ →「填充照片位」里一次选图，会按顺序自动补进空位。</p>
+          <p class="hint" id="slotHint" style="margin-top:8px">按上面这个时间起，每张空位 +1 秒排好；之后在对话页 ⋯「填充空位」里一次选图，会按顺序自动补进空位。</p>
         </div>
       </div>
       <div class="sheet-foot">
@@ -701,7 +711,10 @@
         $("#pickHint").textContent = map[v][2];
         $("#fFile").accept = map[v][3];
       }
-      $("#slotBox").hidden = v !== "image";
+      const slotWord = v === "video" ? "视频" : v === "voice" ? "音频" : "照片";
+      $("#slotBox").hidden = v === "text";
+      $("#slotLabel").textContent = `批量留空（先占位，${slotWord}稍后一次性补）`;
+      $("#slotHint").textContent = `按上面这个时间起，每张空位 +1 秒排好；之后在对话页 ⋯「填充空位」里一次选${slotWord}，会按顺序自动补进空位。`;
     };
     $("#segRole").addEventListener("click", (e) => {
       const b = e.target.closest("button");
@@ -746,14 +759,14 @@
           id: uid(),
           artistId,
           role,
-          type: "image",
+          type,
           text: "",
           textZh: "",
           sentAt: new Date(sent.getTime() + i * 1000).toISOString(),
           createdAt: new Date().toISOString(),
           starred: false,
           syncState: "empty",
-          media: { thumb: null, full: null, name: "", mime: "", size: 0, w: 0, h: 0, duration: 0 },
+          media: { thumb: null, full: null, name: "", mime: "", size: 0, w: 0, h: 0, duration: 0, waves: null },
         });
       }
       await DB.putMany("messages", rows);
@@ -767,7 +780,7 @@
         await reloadAll();
         renderHome();
       }
-      toast(`已留出 ${n} 个照片位，去 ⋯ →「填充照片位」补照片`, 2600);
+      toast(`已留出 ${n} 个${SLOT_KINDS[type]}，去 ⋯「填充空位」补文件`, 2600);
     };
 
     $("#saveMsg").onclick = async () => {
@@ -2066,10 +2079,10 @@
   }
 
   /* 填充照片位：一次选多张图，按空位的时间顺序依次补进去 */
-  function fillSlots(artistId, dayK = null) {
+  function fillSlots(artistId, dayK = null, kind = "image") {
     const inp = document.createElement("input");
     inp.type = "file";
-    inp.accept = "image/*";
+    inp.accept = SLOT_INPUT[kind] || "image/*";
     inp.multiple = true;
     inp.style.display = "none";
     document.body.appendChild(inp);
@@ -2077,13 +2090,13 @@
       const files = [...(inp.files || [])];
       inp.remove();
       if (!files.length) return;
-      await applySlotFiles(artistId, files, dayK);
+      await applySlotFiles(artistId, files, dayK, kind);
     };
     closeSheet();
     inp.click();
   }
 
-  /* 空位跨好几天时，先问要填哪一天 */
+  /* 空位可能有好几种类型、跨好几天：先问填哪种、哪天 */
   async function openFillPicker(artistId) {
     const slots = (await DB.byIndex("messages", "artistId", artistId))
       .filter(isEmptySlot)
@@ -2093,42 +2106,53 @@
           String(x.createdAt || "").localeCompare(String(y.createdAt || ""))
       );
     if (!slots.length) return toast("这段里已经没有空位了");
-    const groups = new Map();
+    const byType = new Map();
     for (const s of slots) {
+      const dm = byType.get(s.type) || new Map();
       const k = dayKey(s.sentAt);
-      if (!groups.has(k)) groups.set(k, []);
-      groups.get(k).push(s);
+      dm.set(k, (dm.get(k) || 0) + 1);
+      byType.set(s.type, dm);
     }
-    const keys = [...groups.keys()].sort();
-    if (keys.length === 1) return fillSlots(artistId, keys[0]);
-    const row = (k, date, meta, go) =>
-      `<button class="fill-day" data-k="${k}">
-        <span class="fd-date">${date}</span>
+    const kinds = [...byType.keys()].sort((a, b) => slotOrder(a) - slotOrder(b));
+    const allDays = new Set(slots.map((s) => dayKey(s.sentAt)));
+    if (kinds.length === 1) {
+      const days = [...byType.get(kinds[0]).keys()].sort();
+      if (days.length === 1) return fillSlots(artistId, days[0], kinds[0]);
+    }
+    const dayRow = (t, k, label, meta, go) =>
+      `<button class="fill-day" data-t="${t}" data-k="${k}">
+        <span class="fd-date">${label}</span>
         <span class="fd-meta">${meta}</span>
         <span class="fd-go">${go}</span></button>`;
-    const sheet = openSheet(`
-      <h2>填充照片位</h2>
-      <p class="hint">先选哪一天，照片就从那天最早的空位开始，按顺序补进去。</p>
-      <div class="fill-list">
-        ${row("", "全部", `${slots.length} 个空位 · 按时间顺序`, "填充")}
-        ${keys
+    const secs = kinds
+      .map((t) => {
+        const dm = byType.get(t);
+        const days = [...dm.keys()].sort();
+        const n = days.reduce((s, k) => s + dm.get(k), 0);
+        const rows = days
           .map((k) => {
             const d = d2(k + "T00:00:00");
-            const n = groups.get(k).length;
-            return row(k, `${d.getMonth() + 1}月${d.getDate()}日`, `${WD[d.getDay()]} · ${n} 个空位`, "填这天");
+            return dayRow(t, k, `${d.getMonth() + 1}月${d.getDate()}日`, `${WD[d.getDay()]} · ${dm.get(k)} 个`, "填这天");
           })
-          .join("")}
-      </div>`);
+          .join("");
+        const all = days.length > 1 ? dayRow(t, "", "全部", `${n} 个 · 按时间顺序`, "填这类") : "";
+        return `<div class="fill-sec"><div class="fill-sec-t">${SLOT_KINDS[t]}<span>${n} 个</span></div>${all}${rows}</div>`;
+      })
+      .join("");
+    const sheet = openSheet(`
+      <h2>填充空位</h2>
+      <p class="hint" style="font-size:12.5px;line-height:1.6">先选哪种、哪天的空位，文件就从那天最早的一个开始，按顺序补进去。</p>
+      <div class="fill-list">${secs}</div>`);
     sheet.addEventListener("click", (e) => {
       const b = e.target.closest(".fill-day");
       if (!b) return;
-      fillSlots(artistId, b.dataset.k || null);
+      fillSlots(artistId, b.dataset.k || null, b.dataset.t || "image");
     });
   }
 
-  async function applySlotFiles(artistId, files, dayK = null) {
+  async function applySlotFiles(artistId, files, dayK = null, kind = "image") {
     const slots = (await DB.byIndex("messages", "artistId", artistId))
-      .filter((m) => isEmptySlot(m) && (!dayK || dayKey(m.sentAt) === dayK))
+      .filter((m) => isEmptySlot(m) && m.type === kind && (!dayK || dayKey(m.sentAt) === dayK))
       .sort(
         (x, y) =>
           (x.sentAt || "").localeCompare(y.sentAt || "") ||
@@ -2136,13 +2160,13 @@
       );
     if (!slots.length) return toast("这段里已经没有空位了");
     closeSheet();
-    toast(`正在填入 ${Math.min(files.length, slots.length)} 张…`, 1600);
+    toast(`正在填入 ${Math.min(files.length, slots.length)} 个${SLOT_KINDS[kind]}…`, 1600);
     let n = 0;
     for (const f of files) {
       const slot = slots[n];
       if (!slot) break;
       try {
-        const prep = await prepareMedia(f, "image");
+        const prep = await prepareMedia(f, kind);
         const m = { ...slot, media: prep, syncState: S.settings.clientId ? "pending" : "local" };
         delete m.driveId;
         await DB.put("messages", m);
@@ -2160,8 +2184,10 @@
     await reloadAll();
     updateSyncBadge();
     const left = slots.length - n;
-    if (dayK) toast(left > 0 ? `这天已填 ${n} 张，还剩 ${left} 个空位` : `这天的 ${n} 个空位都填满了`, 2600);
-    else toast(left > 0 ? `已填 ${n} 张，还剩 ${left} 个空位` : `已填 ${n} 张，照片位都填满了`, 2600);
+    const unit = SLOT_KINDS[kind];
+    if (dayK)
+      toast(left > 0 ? `这天已填 ${n} 个${unit}，还剩 ${left} 个` : `这天的 ${n} 个${unit}都填满了`, 2600);
+    else toast(left > 0 ? `已填 ${n} 个${unit}，还剩 ${left} 个` : `已填 ${n} 个${unit}，都填满了`, 2600);
   }
 
   async function openChatMenu() {
@@ -2169,12 +2195,13 @@
     const slotMsgs = (await DB.byIndex("messages", "artistId", a.id)).filter(isEmptySlot);
     const slotCount = slotMsgs.length;
     const slotDays = new Set(slotMsgs.map((m) => dayKey(m.sentAt))).size;
+    const slotKinds = new Set(slotMsgs.map((m) => m.type)).size;
     const sheet = openSheet(`
       <h2>${esc(a.name)}</h2>
       <div class="menu">
         <button data-act="zh-toggle">${ICON.lang}<span>${S.settings.showZh === false ? "显示中文对照" : "只看原文（隐藏中文）"}</span></button>
         <button data-act="star-filter">${ICON.star}<span>${S.onlyStar ? "显示全部消息" : "只看收藏"}</span></button>
-        ${slotCount ? `<button data-act="fill">${ICON.image}<span>填充照片位（${slotCount} 个空位${slotDays > 1 ? ` · ${slotDays} 天` : ""}）</span></button>` : ""}
+        ${slotCount ? `<button data-act="fill">${ICON.image}<span>填充空位（${slotCount} 个${slotKinds > 1 ? ` · ${slotKinds} 类` : ""}${slotDays > 1 ? ` · ${slotDays} 天` : ""}）</span></button>` : ""}
         <button data-act="edit">${ICON.pencil}<span>改名 / 换头像</span></button>
         <button data-act="export">${ICON.download}<span>导出这段存档</span></button>
         <button data-act="delete" class="danger">${ICON.trash}<span>删除整段存档</span></button>
